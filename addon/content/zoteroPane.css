@@ -1,3 +1,157 @@
 .makeItRed {
   background-color: tomato;
 }
+
+.tab-enhance-vertical-tabs-layout {
+  min-width: 0;
+}
+
+.tab-enhance-vertical-tabs-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 44px;
+  max-width: 420px;
+  width: 260px;
+  background: color-mix(in srgb, var(--material-sidepane, #f4f5f7) 92%, white);
+  border-right: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  color: var(--material-text-primary, #222);
+}
+
+.tab-enhance-vertical-tabs-sidebar.is-collapsed {
+  width: 44px;
+}
+
+.tab-enhance-vertical-tabs-header {
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 8px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.tab-enhance-vertical-tabs-toggle {
+  min-width: 28px;
+  width: 28px;
+  margin: 0;
+}
+
+.tab-enhance-vertical-tabs-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tab-enhance-vertical-tabs-count {
+  min-width: 24px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 11px;
+  text-align: center;
+}
+
+.tab-enhance-vertical-tabs-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+  padding: 8px 6px 10px;
+}
+
+.tab-enhance-vertical-tabs-empty {
+  padding: 14px 8px;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  font-size: 12px;
+}
+
+.tab-enhance-vertical-tab-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tab-enhance-vertical-tab-row:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.tab-enhance-vertical-tab-row.is-selected {
+  background: color-mix(in srgb, #f6b433 24%, white);
+}
+
+.tab-enhance-vertical-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  flex: 0 0 24px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tab-enhance-vertical-tab-badge.is-library {
+  color: #2f6feb;
+}
+
+.tab-enhance-vertical-tab-badge.is-reader {
+  color: #d64242;
+}
+
+.tab-enhance-vertical-tab-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.tab-enhance-vertical-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tab-enhance-vertical-tab-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+  color: color-mix(in srgb, currentColor 60%, transparent);
+  font-size: 11px;
+}
+
+.tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-tabs-list {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-tab-row {
+  justify-content: center;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-tab-content {
+  display: none;
+}
+
+.tab-enhance-vertical-tabs-splitter {
+  min-width: 4px;
+  border-right: 1px solid transparent;
+}
+
