@@ -12,3 +12,6 @@ tabpanel-reader-tab-label = Reader Tab
 show-in-filesystem = Show in File Manager
 reload = Reload Tab
 copy-to-clipboard = Copy Reference to Clipboard
+close-tab = Close Tab
+search-tabs = Search tabs...
+no-matching-tabs = No matching tabs

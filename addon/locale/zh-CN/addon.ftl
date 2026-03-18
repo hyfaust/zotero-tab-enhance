@@ -12,3 +12,6 @@ tabpanel-reader-tab-label = 阅读器标签
 show-in-filesystem = 在文件管理器中显示
 reload = 重新加载标签页
 copy-to-clipboard = 复制引用到剪贴板
+close-tab = 关闭标签页
+search-tabs = 搜索标签页...
+no-matching-tabs = 没有匹配的标签页

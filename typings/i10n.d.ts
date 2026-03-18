@@ -3,6 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 export type FluentMessageId =
+  | 'close-tab'
   | 'copy-to-clipboard'
   | 'item-info-row-example-label'
   | 'item-section-example1-head-text'
@@ -14,6 +15,7 @@ export type FluentMessageId =
   | 'menuitem-label'
   | 'menuitem-submenulabel'
   | 'menupopup-label'
+  | 'no-matching-tabs'
   | 'pref-enable-copy-reference'
   | 'pref-enable-features'
   | 'pref-enable-go-to-attachment'
@@ -23,6 +25,7 @@ export type FluentMessageId =
   | 'prefs-table-title'
   | 'prefs-title'
   | 'reload'
+  | 'search-tabs'
   | 'show-in-filesystem'
   | 'startup-begin'
   | 'startup-finish'

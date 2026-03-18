@@ -30,6 +30,7 @@ export default class TabTrackerService {
   };
   private openedAtByTabId = new Map<string, number>();
   private listeners = new Set<SnapshotListener>();
+  private delayedReconcileTimers = new Set<number>();
 
   constructor(window: _ZoteroTypes.MainWindow) {
     this.window = window;
@@ -54,6 +55,8 @@ export default class TabTrackerService {
     this.initialized = false;
     this.snapshot = { tabs: [], selectedTabKey: null };
     this.openedAtByTabId.clear();
+    this.delayedReconcileTimers.forEach((timerId) => this.window.clearTimeout(timerId));
+    this.delayedReconcileTimers.clear();
     this.listeners.clear();
     ztoolkit.log("TabTrackerService destroyed");
   }
@@ -133,6 +136,22 @@ export default class TabTrackerService {
     );
   }
 
+  public scheduleDelayedReconcile(
+    reason: string,
+    delays: number[] = [60, 180, 420],
+  ): void {
+    delays.forEach((delay) => {
+      const timerId = this.window.setTimeout(() => {
+        this.delayedReconcileTimers.delete(timerId);
+        if (!this.initialized) {
+          return;
+        }
+        this.reconcile(`${reason}:delayed-${delay}`);
+      }, delay);
+      this.delayedReconcileTimers.add(timerId);
+    });
+  }
+
   private emit(): void {
     const snapshot = this.getSnapshot();
     this.listeners.forEach((listener) => {
@@ -157,13 +176,19 @@ export default class TabTrackerService {
       }
 
       mergedTabs.push({
-        ...stateTab,
         ...internalTab,
+        ...stateTab,
         data: {
-          ...(stateTab.data ?? {}),
           ...(internalTab.data ?? {}),
+          ...(stateTab.data ?? {}),
         },
         id,
+        title: this.resolveDisplayTitle(stateTab, internalTab, id),
+        type: stateTab.type || internalTab.type,
+        selected:
+          typeof stateTab.selected === "boolean"
+            ? stateTab.selected
+            : internalTab.selected,
       });
     });
 
@@ -184,6 +209,41 @@ export default class TabTrackerService {
 
   private toRuntimeTabs(tabs: unknown): RuntimeTabLike[] {
     return Array.isArray(tabs) ? (tabs as RuntimeTabLike[]) : [];
+  }
+
+  private resolveDisplayTitle(
+    stateTab: RuntimeTabLike,
+    internalTab: RuntimeTabLike,
+    tabId: string,
+  ): string {
+    const stateTitle = this.normalizeTitle(stateTab.title, tabId);
+    if (stateTitle) {
+      return stateTitle;
+    }
+
+    const internalTitle = this.normalizeTitle(internalTab.title, tabId);
+    if (internalTitle) {
+      return internalTitle;
+    }
+
+    return tabId;
+  }
+
+  private normalizeTitle(title: string | undefined, tabId: string): string | null {
+    if (typeof title !== "string") {
+      return null;
+    }
+
+    const normalized = title.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    if (normalized === tabId) {
+      return null;
+    }
+
+    return normalized;
   }
 
   private resolveTabId(tab: RuntimeTabLike): string | null {
