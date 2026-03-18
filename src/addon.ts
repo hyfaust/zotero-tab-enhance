@@ -1,8 +1,10 @@
 import { config } from "../package.json";
 import { ColumnOptions, DialogHelper } from "zotero-plugin-toolkit";
 import hooks from "./hooks";
-import { createZToolkit } from "./utils/ztoolkit";
 import TabEnhance from "./modules/tabEnhance";
+import VerticalTabSidebar from "./modules/verticalTabs/sidebar";
+import TabTrackerService from "./modules/verticalTabs/tabTracker";
+import { createZToolkit } from "./utils/ztoolkit";
 
 class Addon {
   public data: {
@@ -21,14 +23,14 @@ class Addon {
       rows: Array<{ [dataKey: string]: string }>;
     };
     dialog?: DialogHelper;
+    tabNotifierID?: string;
   };
-  // Lifecycle hooks
   public hooks: typeof hooks;
-  // APIs
   public api: object;
 
-  // Store TabEnhance instances for each window
   public tabEnhanceInstances: Map<Window, TabEnhance>;
+  public tabTrackerInstances: Map<Window, TabTrackerService>;
+  public verticalTabSidebarInstances: Map<Window, VerticalTabSidebar>;
 
   constructor() {
     this.data = {
@@ -41,6 +43,8 @@ class Addon {
     this.hooks = hooks;
     this.api = {};
     this.tabEnhanceInstances = new Map();
+    this.tabTrackerInstances = new Map();
+    this.verticalTabSidebarInstances = new Map();
   }
 }
 
