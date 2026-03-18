@@ -1,7 +1,8 @@
 import { ZoteroToolkit } from "zotero-plugin-toolkit";
 import { getString } from "../utils/locale";
-import { get } from "http";
+import TabCommandController from "./verticalTabs/tabCommands";
 import { getPref } from "../utils/prefs";
+
 interface TabInfo {
   tabId: string | null;
   isSelected: boolean;
@@ -11,7 +12,8 @@ interface TabInfo {
 interface MenuItemConfig {
   id: string;
   label: string;
-  handler: () => void;
+  handler: () => Promise<void> | void;
+  disabled?: boolean;
 }
 
 const MENU_ITEM_IDS = {
@@ -21,7 +23,7 @@ const MENU_ITEM_IDS = {
 } as const;
 
 export default class TabEnhance {
-  private window: Window;
+  private window: _ZoteroTypes.MainWindow;
   private document: Document;
   private initialized: boolean;
   private lastClickedTabInfo: TabInfo | null = null;
@@ -29,14 +31,16 @@ export default class TabEnhance {
   private handlepopupshowingEvent!: (event: Event) => void;
   private ztoolkit: ZoteroToolkit = ztoolkit;
   private availableMenuItems: MenuItemConfig[] = [];
+  private commandController: TabCommandController;
 
-  constructor(window: Window) {
+  constructor(window: _ZoteroTypes.MainWindow) {
     this.window = window;
     if (!window.document) {
       throw new Error("Document is not available on the provided window.");
     }
     this.document = window.document;
     this.initialized = false;
+    this.commandController = new TabCommandController(window);
   }
 
   public init(): void {
@@ -68,7 +72,7 @@ export default class TabEnhance {
 
     this.handlepopupshowingEvent = (event: Event) => {
       if (!this.lastClickedTabInfo) return;
-      this.addExtraMenuItems(event.target, this.lastClickedTabInfo!);
+      this.addExtraMenuItems(event.target, this.lastClickedTabInfo);
       this.lastClickedTabInfo = null;
     };
   }
@@ -99,29 +103,24 @@ export default class TabEnhance {
   }
 
   private updateAvailableMenuItems(tabInfo: TabInfo) {
-    this.availableMenuItems = new Array<MenuItemConfig>();
+    this.availableMenuItems = [];
+    const items = this.commandController.getContextMenuItems(tabInfo.tabId);
 
-    if (getPref("enableCopyReference")) {
-      this.availableMenuItems.push({
-        id: MENU_ITEM_IDS.COPY_REFERENCE,
-        label: getString(MENU_ITEM_IDS.COPY_REFERENCE),
-        handler: () => this.copyReference(tabInfo.tabId),
-      });
-    }
-    if (getPref("enableGoToAttachment")) {
-      this.availableMenuItems.push({
-        id: MENU_ITEM_IDS.SHOW_IN_FILESYSTEM,
-        label: getString(MENU_ITEM_IDS.SHOW_IN_FILESYSTEM),
-        handler: () => this.showInFilesystem(tabInfo.tabId),
-      });
-    }
-    if (getPref("enableReloadTab")) {
-      this.availableMenuItems.push({
-        id: MENU_ITEM_IDS.RELOAD,
-        label: getString(MENU_ITEM_IDS.RELOAD),
-        handler: () => this.reloadTab(tabInfo.tabId),
-      });
-    }
+    items.forEach((item) => {
+      if (item.id === MENU_ITEM_IDS.COPY_REFERENCE && !getPref("enableCopyReference")) {
+        return;
+      }
+      if (item.id === MENU_ITEM_IDS.SHOW_IN_FILESYSTEM && !getPref("enableGoToAttachment")) {
+        return;
+      }
+      if (item.id === MENU_ITEM_IDS.RELOAD && !getPref("enableReloadTab")) {
+        return;
+      }
+      if (item.id === "close") {
+        return;
+      }
+      this.availableMenuItems.push(item);
+    });
   }
 
   private addExtraMenuItems(element: EventTarget | null, tabInfo: TabInfo) {
@@ -144,7 +143,10 @@ export default class TabEnhance {
     const menuItem = this.ztoolkit.createXULElement(this.document, "menuitem");
     menuItem.setAttribute("id", config.id);
     menuItem.setAttribute("label", config.label);
-    menuItem.addEventListener("command", config.handler);
+    if (config.disabled) {
+      menuItem.setAttribute("disabled", "true");
+    }
+    menuItem.addEventListener("command", () => void config.handler());
     element.appendChild(menuItem);
   }
 
@@ -160,7 +162,6 @@ export default class TabEnhance {
     );
   }
 
-  // UI Helpers
   private getTabContainers(): Element[] {
     return [this.document.querySelector(".tabs-wrapper .tabs")].filter(
       (container) => container !== null,
@@ -177,99 +178,5 @@ export default class TabEnhance {
       "popupshowing",
       this.handlepopupshowingEvent,
     );
-  }
-
-  async showInFilesystem(tabId: string | null) {
-    try {
-      const { tab } = this.window.Zotero_Tabs._getTab(tabId);
-      if (!tab || (tab.type !== "reader" && tab.type !== "reader-unloaded")) {
-        return;
-      }
-
-      const itemID = tab.data.itemID;
-      const item = Zotero.Items.get(itemID);
-      const attachment = item.isFileAttachment()
-        ? item
-        : await item.getBestAttachment();
-      if (!attachment) {
-        return;
-      }
-      await this.window.ZoteroPane.showAttachmentInFilesystem(attachment.id);
-    } catch (error) {
-      this.ztoolkit.log("Error showing in filesystem:", error);
-    }
-  }
-
-  private async reloadTab(tabId: string | null) {
-    try {
-      const { tab } = this.window.Zotero_Tabs._getTab(tabId);
-      if (!tab || (tab.type !== "reader" && tab.type !== "reader-unloaded")) {
-        return;
-      }
-      const { itemID, secondViewState } = tab.data;
-      const item = Zotero.Items.get(itemID);
-      this.window.Zotero_Tabs.close(tabId);
-      await (Zotero as any).FileHandlers.open(item);
-    } catch (error) {
-      this.ztoolkit.log("Error reloading tab:", error);
-    }
-  }
-
-  private copyReference(tabId: string | null) {
-    const { tab } = this.window.Zotero_Tabs._getTab(tabId);
-    if (!tab || (tab.type !== "reader" && tab.type !== "reader-unloaded")) {
-      return;
-    }
-
-    const itemID = tab.data.itemID;
-    const item = Zotero.Items.get(itemID).topLevelItem;
-
-    let items = [item];
-
-    let format = Zotero.QuickCopy.getFormatFromURL(
-      Zotero.QuickCopy.lastActiveURL,
-    );
-    if (items.every((item) => item.isNote() || item.isAttachment())) {
-      format = Zotero.QuickCopy.getNoteFormat();
-    }
-    format = Zotero.QuickCopy.unserializeSetting(format);
-    // this.ztoolkit.log("copyReference: format", format);
-
-    // In bibliography mode, remove notes and attachments
-    if (format.mode === "bibliography") {
-      items = items.filter((item) => item.isRegularItem());
-    }
-
-    if (!items.length) {
-      this.ztoolkit.log("copyReference: items is empty!");
-      return;
-    }
-
-    const locale = format.locale
-      ? format.locale
-      : Zotero.Prefs.get("export.quickCopy.locale");
-
-    // this.ztoolkit.log("copyReference: locale", locale);
-
-    if (format.mode == "bibliography") {
-      this.window.Zotero_File_Interface.copyItemsToClipboard(
-        items,
-        format.id,
-        locale,
-        format.contentType == "html",
-        false,
-      );
-      this.ztoolkit.log(
-        "copyReference: items copied to clipboard bibliography",
-        items,
-      );
-    } else if (format.mode === "export") {
-      // Copy citations doesn't work in export mode
-      this.ztoolkit.log(
-        "copyReference: items copied to clipboard export",
-        items,
-      );
-      this.window.Zotero_File_Interface.exportItemsToClipboard(items, format);
-    }
   }
 }

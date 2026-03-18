@@ -1,5 +1,7 @@
 import { config } from "../../../package.json";
+import { getString } from "../../utils/locale";
 import TabTrackerService from "./tabTracker";
+import TabCommandController, { TabCommandItem } from "./tabCommands";
 import { LIBRARY_TAB_ID, TabTrackerSnapshot, TrackedTab } from "./types";
 
 const DEFAULT_EXPANDED_WIDTH = 260;
@@ -9,15 +11,19 @@ export default class VerticalTabSidebar {
   private readonly window: _ZoteroTypes.MainWindow;
   private readonly document: Document;
   private readonly tracker: TabTrackerService;
+  private readonly commandController: TabCommandController;
   private initialized = false;
   private collapsed = false;
   private expandedWidth = DEFAULT_EXPANDED_WIDTH;
+  private searchQuery = "";
   private sidebar?: XULElement;
   private splitter?: XULElement;
   private toggleButton?: XULElement;
   private headerTitle?: HTMLElement;
   private countBadge?: HTMLElement;
   private listContainer?: HTMLElement;
+  private searchInput?: HTMLInputElement;
+  private contextMenu?: XULPopupElement;
   private stylesheet?: HTMLElement;
   private unsubscribeTracker?: () => void;
   private trackedTabsByKey = new Map<string, TrackedTab>();
@@ -33,10 +39,12 @@ export default class VerticalTabSidebar {
     }
   };
 
+
   constructor(window: _ZoteroTypes.MainWindow, tracker: TabTrackerService) {
     this.window = window;
     this.document = window.document;
     this.tracker = tracker;
+    this.commandController = new TabCommandController(window);
   }
 
   public init(): void {
@@ -69,6 +77,7 @@ export default class VerticalTabSidebar {
 
     this.sidebar?.remove();
     this.splitter?.remove();
+    this.contextMenu?.remove();
     this.stylesheet?.remove();
     this.sidebar = undefined;
     this.splitter = undefined;
@@ -76,6 +85,8 @@ export default class VerticalTabSidebar {
     this.headerTitle = undefined;
     this.countBadge = undefined;
     this.listContainer = undefined;
+    this.searchInput = undefined;
+    this.contextMenu = undefined;
     this.stylesheet = undefined;
     this.trackedTabsByKey.clear();
     this.initialized = false;
@@ -136,6 +147,25 @@ export default class VerticalTabSidebar {
       },
     }) as HTMLDivElement;
 
+    const searchInput = ztoolkit.UI.createElement(this.document, "input", {
+      namespace: "html",
+      classList: ["tab-enhance-vertical-tabs-search"],
+      attributes: {
+        type: "search",
+        placeholder: getString("search-tabs"),
+      },
+      listeners: [
+        {
+          type: "input",
+          listener: (event: Event) => {
+            const target = event.currentTarget as HTMLInputElement | null;
+            this.searchQuery = target?.value.trim().toLocaleLowerCase() ?? "";
+            this.render(this.tracker.getSnapshot());
+          },
+        },
+      ],
+    }) as HTMLInputElement;
+
     const listContainer = ztoolkit.UI.createElement(this.document, "div", {
       namespace: "html",
       classList: ["tab-enhance-vertical-tabs-list"],
@@ -144,11 +174,23 @@ export default class VerticalTabSidebar {
       },
     }) as HTMLDivElement;
 
+    const contextMenu = ztoolkit.UI.createElement(this.document, "menupopup", {
+      classList: ["tab-enhance-vertical-tabs-context-menu"],
+      attributes: {
+        id: `${config.addonRef}-vertical-tabs-context-menu`,
+      },
+    }) as unknown as XULPopupElement;
+
     header.appendChild(toggleButton);
     header.appendChild(headerText);
     header.appendChild(countBadge);
     sidebar.appendChild(header);
+    sidebar.appendChild(searchInput);
     sidebar.appendChild(listContainer);
+
+    const popupHost =
+      this.document.getElementById("mainPopupSet") ?? this.document.documentElement;
+    popupHost?.appendChild(contextMenu);
 
     const splitter = ztoolkit.UI.createElement(this.document, "splitter", {
       classList: ["tab-enhance-vertical-tabs-splitter"],
@@ -165,16 +207,16 @@ export default class VerticalTabSidebar {
     this.toggleButton = toggleButton;
     this.headerTitle = headerText;
     this.countBadge = countBadge;
+    this.searchInput = searchInput;
     this.listContainer = listContainer;
+    this.contextMenu = contextMenu;
     this.applySidebarWidth();
     return true;
   }
 
   private ensureStylesheet(): HTMLElement {
     const stylesheetId = `${config.addonRef}-vertical-tabs-style`;
-    const existing = this.document.getElementById(
-      stylesheetId,
-    ) as HTMLElement | null;
+    const existing = this.document.getElementById(stylesheetId) as HTMLElement | null;
     if (existing) {
       return existing;
     }
@@ -194,6 +236,7 @@ export default class VerticalTabSidebar {
 
   private toggleCollapsed(): void {
     this.collapsed = !this.collapsed;
+    this.hideContextMenu();
     this.applySidebarWidth();
     this.render(this.tracker.getSnapshot());
   }
@@ -209,10 +252,12 @@ export default class VerticalTabSidebar {
       this.sidebar.classList.add("is-collapsed");
       this.sidebar.style.width = `${COLLAPSED_WIDTH}px`;
       this.splitter.setAttribute("hidden", "true");
+      this.searchInput?.setAttribute("hidden", "true");
     } else {
       this.sidebar.classList.remove("is-collapsed");
       this.sidebar.style.width = `${this.expandedWidth}px`;
       this.splitter.removeAttribute("hidden");
+      this.searchInput?.removeAttribute("hidden");
     }
   }
 
@@ -221,11 +266,12 @@ export default class VerticalTabSidebar {
       return;
     }
 
-    const visibleTabs = snapshot.tabs.filter((tab) =>
-      this.shouldRenderTab(tab),
-    );
+    const visibleTabs = snapshot.tabs
+      .filter((tab) => this.shouldRenderTab(tab))
+      .filter((tab) => this.matchesSearch(tab));
     const listContainer = this.listContainer;
     this.trackedTabsByKey.clear();
+    this.hideContextMenu();
     this.headerTitle.textContent = this.collapsed ? "" : "Tabs";
     this.countBadge.textContent = String(visibleTabs.length);
     listContainer.textContent = "";
@@ -235,7 +281,11 @@ export default class VerticalTabSidebar {
         namespace: "html",
         classList: ["tab-enhance-vertical-tabs-empty"],
         properties: {
-          textContent: this.collapsed ? "0" : "No tabs open",
+          textContent: this.searchQuery
+            ? getString("no-matching-tabs")
+            : this.collapsed
+              ? "0"
+              : "No tabs open",
         },
       }) as HTMLDivElement;
       listContainer.appendChild(emptyState);
@@ -274,6 +324,15 @@ export default class VerticalTabSidebar {
     );
   }
 
+  private matchesSearch(tab: TrackedTab): boolean {
+    if (!this.searchQuery) {
+      return true;
+    }
+
+    const haystack = `${tab.title} ${this.getMetaText(tab)}`.toLocaleLowerCase();
+    return haystack.includes(this.searchQuery);
+  }
+
   private renderTabRow(
     tab: TrackedTab,
     selectedTabKey: string | null,
@@ -297,6 +356,7 @@ export default class VerticalTabSidebar {
     row.dataset.tabKey = tab.key;
     row.addEventListener("click", this.handleRowClick);
     row.addEventListener("keydown", this.handleRowKeyDown);
+    row.addEventListener("contextmenu", this.handleRowContextMenu);
 
     if (isSelected) {
       row.classList.add("is-selected");
@@ -338,16 +398,34 @@ export default class VerticalTabSidebar {
     content.appendChild(meta);
     row.appendChild(badge);
     row.appendChild(content);
+
+    if (!this.collapsed && tab.tabId) {
+      const closeButton = ztoolkit.UI.createElement(this.document, "button", {
+        namespace: "html",
+        classList: ["tab-enhance-vertical-tab-close"],
+        properties: {
+          textContent: "x",
+          title: getString("close-tab"),
+        },
+        listeners: [
+          {
+            type: "click",
+            listener: (event: Event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              this.commandController.close(tab.tabId);
+            },
+          },
+        ],
+      }) as HTMLButtonElement;
+      row.appendChild(closeButton);
+    }
+
     return row;
   }
 
   private readonly handleRowClick = (event: MouseEvent) => {
     const row = event.currentTarget as HTMLDivElement | null;
-    ztoolkit.log("VerticalTabSidebar row click", {
-      targetType: event.target?.constructor?.name ?? "unknown",
-      currentTargetType: event.currentTarget?.constructor?.name ?? "unknown",
-      tabKey: row?.dataset.tabKey ?? null,
-    });
     if (!row) {
       return;
     }
@@ -361,11 +439,6 @@ export default class VerticalTabSidebar {
       return;
     }
     const row = event.currentTarget as HTMLDivElement | null;
-    ztoolkit.log("VerticalTabSidebar row keydown", {
-      key: event.key,
-      currentTargetType: event.currentTarget?.constructor?.name ?? "unknown",
-      tabKey: row?.dataset.tabKey ?? null,
-    });
     if (!row) {
       return;
     }
@@ -374,18 +447,23 @@ export default class VerticalTabSidebar {
     this.selectTrackedTabByKey(row.dataset.tabKey ?? null);
   };
 
+  private readonly handleRowContextMenu = (event: MouseEvent) => {
+    const row = event.currentTarget as HTMLDivElement | null;
+    if (!row) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.showContextMenu(row.dataset.tabKey ?? null, event.screenX, event.screenY);
+  };
+
   private selectTrackedTabByKey(tabKey: string | null): void {
-    ztoolkit.log("VerticalTabSidebar selectTrackedTabByKey", {
-      tabKey,
-      knownKeys: Array.from(this.trackedTabsByKey.keys()),
-    });
     if (!tabKey) {
       return;
     }
 
     const tracked = this.trackedTabsByKey.get(tabKey);
     if (!tracked) {
-      ztoolkit.log("VerticalTabSidebar missing tracked tab for key", tabKey);
       this.tracker.reconcile("missing-tab-key");
       return;
     }
@@ -398,43 +476,74 @@ export default class VerticalTabSidebar {
       return;
     }
 
-    ztoolkit.log("VerticalTabSidebar click", {
-      tabId,
-      title: tab.title,
-      nativeIndex: tab.nativeIndex,
-    });
-
     try {
-      const { tabIndex } = this.window.Zotero_Tabs._getTab(tabId);
-      this.window.Zotero_Tabs.jump(tabIndex);
+      this.commandController.select(tabId);
       return;
     } catch (error) {
-      ztoolkit.log(
-        "VerticalTabSidebar jump(from _getTab) failed",
-        tabId,
-        error,
-      );
-    }
-
-    try {
-      this.window.Zotero_Tabs.select(tabId);
-      return;
-    } catch (error) {
-      ztoolkit.log("VerticalTabSidebar select(tabId) failed", tabId, error);
-    }
-
-    try {
-      this.window.Zotero_Tabs.jump(tab.nativeIndex);
-      return;
-    } catch (error) {
-      ztoolkit.log(
-        "VerticalTabSidebar jump(nativeIndex) failed",
-        tab.nativeIndex,
-        error,
-      );
+      ztoolkit.log("VerticalTabSidebar select failed", tabId, error);
     }
 
     this.tracker.reconcile("failed-select");
+  }
+
+  private showContextMenu(tabKey: string | null, screenX: number, screenY: number): void {
+    if (!this.contextMenu || !tabKey) {
+      return;
+    }
+
+    const tracked = this.trackedTabsByKey.get(tabKey);
+    if (!tracked) {
+      return;
+    }
+
+    const items = this.commandController.getContextMenuItems(tracked.tabId);
+
+    while (this.contextMenu.firstChild) {
+      this.contextMenu.removeChild(this.contextMenu.firstChild);
+    }
+
+    items.forEach((item) => {
+      this.contextMenu?.appendChild(this.renderContextMenuItem(item));
+    });
+
+    this.contextMenu.openPopupAtScreen(screenX, screenY, true);
+  }
+
+  private renderContextMenuItem(item: TabCommandItem): XULElement {
+    const menuItem = ztoolkit.UI.createElement(this.document, "menuitem", {
+      attributes: {
+        label: item.label,
+      },
+      listeners: [
+        {
+          type: "command",
+          listener: async () => {
+            this.hideContextMenu();
+            if (item.disabled) {
+              return;
+            }
+            await item.handler();
+          },
+        },
+      ],
+    }) as XULElement;
+
+    if (item.disabled) {
+      menuItem.setAttribute("disabled", "true");
+    }
+
+    return menuItem;
+  }
+
+  private hideContextMenu(): void {
+    if (!this.contextMenu) {
+      return;
+    }
+
+    this.contextMenu.hidePopup();
+    while (this.contextMenu.firstChild) {
+      this.contextMenu.removeChild(this.contextMenu.firstChild);
+    }
   }
 
   private getBadgeText(tab: TrackedTab): string {
