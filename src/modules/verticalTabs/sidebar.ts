@@ -6,6 +6,9 @@ import { LIBRARY_TAB_ID, TabTrackerSnapshot, TrackedTab } from "./types";
 
 const DEFAULT_EXPANDED_WIDTH = 260;
 const COLLAPSED_WIDTH = 44;
+const DROP_POSITION_HYSTERESIS = 8;
+
+type DropPosition = "before" | "after";
 
 export default class VerticalTabSidebar {
   private readonly window: _ZoteroTypes.MainWindow;
@@ -27,6 +30,9 @@ export default class VerticalTabSidebar {
   private stylesheet?: HTMLElement;
   private unsubscribeTracker?: () => void;
   private trackedTabsByKey = new Map<string, TrackedTab>();
+  private draggedTabKey: string | null = null;
+  private dragOverTabKey: string | null = null;
+  private dragOverPosition: DropPosition | null = null;
 
   private readonly handleResizeEnd = () => {
     if (!this.sidebar || this.collapsed) {
@@ -39,6 +45,57 @@ export default class VerticalTabSidebar {
     }
   };
 
+  private readonly handleListDragOver = (event: DragEvent) => {
+    if (!this.draggedTabKey || !this.listContainer) {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+
+    const row = this.getRowFromEventTarget(event.target);
+    if (row) {
+      return;
+    }
+
+    const target = this.resolveDropTargetFromPoint(event.clientY);
+    if (!target) {
+      this.clearDropIndicator();
+      return;
+    }
+
+    this.setDropIndicator(target.tabKey, target.position);
+  };
+
+  private readonly handleListDrop = (event: DragEvent) => {
+    if (!this.draggedTabKey || !this.listContainer) {
+      return;
+    }
+
+    event.preventDefault();
+    const row = this.getRowFromEventTarget(event.target);
+    if (row) {
+      this.commitDrop(
+        row.dataset.tabKey ?? null,
+        this.getDropPosition(row, event),
+      );
+      return;
+    }
+
+    const target = this.resolveDropTargetFromPoint(event.clientY);
+    if (!target) {
+      this.clearDragState();
+      return;
+    }
+
+    this.commitDrop(target.tabKey, target.position);
+  };
+
+  private readonly handleWindowDragEnd = () => {
+    this.clearDragState();
+  };
 
   constructor(window: _ZoteroTypes.MainWindow, tracker: TabTrackerService) {
     this.window = window;
@@ -63,6 +120,7 @@ export default class VerticalTabSidebar {
       this.render(snapshot);
     });
     this.window.addEventListener("mouseup", this.handleResizeEnd);
+    this.window.addEventListener("dragend", this.handleWindowDragEnd, true);
     ztoolkit.log("VerticalTabSidebar initialized");
   }
 
@@ -74,6 +132,7 @@ export default class VerticalTabSidebar {
     this.unsubscribeTracker?.();
     this.unsubscribeTracker = undefined;
     this.window.removeEventListener("mouseup", this.handleResizeEnd);
+    this.window.removeEventListener("dragend", this.handleWindowDragEnd, true);
 
     this.sidebar?.remove();
     this.splitter?.remove();
@@ -89,6 +148,7 @@ export default class VerticalTabSidebar {
     this.contextMenu = undefined;
     this.stylesheet = undefined;
     this.trackedTabsByKey.clear();
+    this.clearDragState();
     this.initialized = false;
     ztoolkit.log("VerticalTabSidebar destroyed");
   }
@@ -172,6 +232,16 @@ export default class VerticalTabSidebar {
       attributes: {
         role: "listbox",
       },
+      listeners: [
+        {
+          type: "dragover",
+          listener: this.handleListDragOver,
+        },
+        {
+          type: "drop",
+          listener: this.handleListDrop,
+        },
+      ],
     }) as HTMLDivElement;
 
     const contextMenu = ztoolkit.UI.createElement(this.document, "menupopup", {
@@ -189,7 +259,8 @@ export default class VerticalTabSidebar {
     sidebar.appendChild(listContainer);
 
     const popupHost =
-      this.document.getElementById("mainPopupSet") ?? this.document.documentElement;
+      this.document.getElementById("mainPopupSet") ??
+      this.document.documentElement;
     popupHost?.appendChild(contextMenu);
 
     const splitter = ztoolkit.UI.createElement(this.document, "splitter", {
@@ -216,7 +287,9 @@ export default class VerticalTabSidebar {
 
   private ensureStylesheet(): HTMLElement {
     const stylesheetId = `${config.addonRef}-vertical-tabs-style`;
-    const existing = this.document.getElementById(stylesheetId) as HTMLElement | null;
+    const existing = this.document.getElementById(
+      stylesheetId,
+    ) as HTMLElement | null;
     if (existing) {
       return existing;
     }
@@ -266,15 +339,22 @@ export default class VerticalTabSidebar {
       return;
     }
 
-    const visibleTabs = snapshot.tabs
-      .filter((tab) => this.shouldRenderTab(tab))
-      .filter((tab) => this.matchesSearch(tab));
+    const visibleTabs = this.getVisibleTabs(snapshot);
     const listContainer = this.listContainer;
     this.trackedTabsByKey.clear();
     this.hideContextMenu();
     this.headerTitle.textContent = this.collapsed ? "" : "Tabs";
     this.countBadge.textContent = String(visibleTabs.length);
     listContainer.textContent = "";
+
+    if (
+      this.draggedTabKey &&
+      !visibleTabs.some(
+        (tab) => this.normalizeTab(tab).key === this.draggedTabKey,
+      )
+    ) {
+      this.clearDragState();
+    }
 
     if (visibleTabs.length === 0) {
       const emptyState = ztoolkit.UI.createElement(this.document, "div", {
@@ -295,10 +375,65 @@ export default class VerticalTabSidebar {
     visibleTabs.forEach((tab) => {
       const normalizedTab = this.normalizeTab(tab);
       this.trackedTabsByKey.set(normalizedTab.key, normalizedTab);
+
+      if (
+        normalizedTab.key === this.dragOverTabKey &&
+        this.dragOverPosition === "before"
+      ) {
+        listContainer.appendChild(this.renderDropPlaceholder());
+      }
+
       listContainer.appendChild(
         this.renderTabRow(normalizedTab, snapshot.selectedTabKey),
       );
+
+      if (
+        normalizedTab.key === this.dragOverTabKey &&
+        this.dragOverPosition === "after"
+      ) {
+        listContainer.appendChild(this.renderDropPlaceholder());
+      }
     });
+  }
+
+  private renderDropPlaceholder(): HTMLElement {
+    return ztoolkit.UI.createElement(this.document, "div", {
+      namespace: "html",
+      classList: ["tab-enhance-vertical-tab-placeholder"],
+      attributes: {
+        "aria-hidden": "true",
+      },
+    }) as HTMLDivElement;
+  }
+
+  private getVisibleTabs(snapshot: TabTrackerSnapshot): TrackedTab[] {
+    return snapshot.tabs
+      .map((tab) => this.normalizeTab(tab))
+      .filter((tab) => this.shouldRenderTab(tab))
+      .filter((tab) => this.matchesSearch(tab));
+  }
+
+  private isNoOpDropTarget(
+    targetTabKey: string | null,
+    position: DropPosition | null,
+  ): boolean {
+    if (!this.draggedTabKey || !targetTabKey || !position) {
+      return false;
+    }
+
+    const visibleKeys = this.getVisibleTabs(this.tracker.getSnapshot()).map(
+      (tab) => tab.key,
+    );
+    const sourceIndex = visibleKeys.indexOf(this.draggedTabKey);
+    const targetIndex = visibleKeys.indexOf(targetTabKey);
+    if (sourceIndex < 0 || targetIndex < 0) {
+      return false;
+    }
+
+    return (
+      (position === "after" && targetIndex === sourceIndex - 1) ||
+      (position === "before" && targetIndex === sourceIndex + 1)
+    );
   }
 
   private normalizeTab(tab: TrackedTab): TrackedTab {
@@ -329,7 +464,8 @@ export default class VerticalTabSidebar {
       return true;
     }
 
-    const haystack = `${tab.title} ${this.getMetaText(tab)}`.toLocaleLowerCase();
+    const haystack =
+      `${tab.title} ${this.getMetaText(tab)}`.toLocaleLowerCase();
     return haystack.includes(this.searchQuery);
   }
 
@@ -346,6 +482,7 @@ export default class VerticalTabSidebar {
       classList: ["tab-enhance-vertical-tab-row"],
       properties: {
         title: tab.title,
+        draggable: Boolean(tab.tabId),
       },
       attributes: {
         role: "button",
@@ -354,15 +491,24 @@ export default class VerticalTabSidebar {
     }) as HTMLDivElement;
 
     row.dataset.tabKey = tab.key;
+    row.dataset.nativeIndex = String(tab.nativeIndex);
     row.addEventListener("click", this.handleRowClick);
     row.addEventListener("keydown", this.handleRowKeyDown);
     row.addEventListener("contextmenu", this.handleRowContextMenu);
+    row.addEventListener("dragstart", this.handleRowDragStart);
+    row.addEventListener("dragover", this.handleRowDragOver);
+    row.addEventListener("drop", this.handleRowDrop);
+    row.addEventListener("dragend", this.handleRowDragEnd);
 
     if (isSelected) {
       row.classList.add("is-selected");
       row.setAttribute("aria-selected", "true");
     } else {
       row.setAttribute("aria-selected", "false");
+    }
+
+    if (tab.key === this.draggedTabKey) {
+      row.classList.add("is-dragging");
     }
 
     const badge = ztoolkit.UI.createElement(this.document, "span", {
@@ -406,6 +552,7 @@ export default class VerticalTabSidebar {
         properties: {
           textContent: "x",
           title: getString("close-tab"),
+          draggable: false,
         },
         listeners: [
           {
@@ -454,7 +601,80 @@ export default class VerticalTabSidebar {
     }
     event.preventDefault();
     event.stopPropagation();
-    this.showContextMenu(row.dataset.tabKey ?? null, event.screenX, event.screenY);
+    this.showContextMenu(
+      row.dataset.tabKey ?? null,
+      event.screenX,
+      event.screenY,
+    );
+  };
+
+  private readonly handleRowDragStart = (event: DragEvent) => {
+    const row = event.currentTarget as HTMLDivElement | null;
+    const tabKey = row?.dataset.tabKey ?? null;
+    const tracked = tabKey ? this.trackedTabsByKey.get(tabKey) : null;
+    if (!row || !tracked?.tabId) {
+      event.preventDefault();
+      return;
+    }
+
+    this.hideContextMenu();
+    this.draggedTabKey = tabKey;
+    this.dragOverTabKey = null;
+    this.dragOverPosition = null;
+    row.classList.add("is-dragging");
+
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.dropEffect = "move";
+      event.dataTransfer.setData("text/plain", tracked.key);
+    }
+  };
+
+  private readonly handleRowDragOver = (event: DragEvent) => {
+    if (!this.draggedTabKey) {
+      return;
+    }
+
+    const row = event.currentTarget as HTMLDivElement | null;
+    if (!row) {
+      return;
+    }
+
+    const tabKey = row.dataset.tabKey ?? null;
+    if (!tabKey || tabKey === this.draggedTabKey) {
+      event.preventDefault();
+      this.clearDropIndicator();
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+    this.setDropIndicator(tabKey, this.getDropPosition(row, event));
+  };
+
+  private readonly handleRowDrop = (event: DragEvent) => {
+    if (!this.draggedTabKey) {
+      return;
+    }
+
+    const row = event.currentTarget as HTMLDivElement | null;
+    if (!row) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    this.commitDrop(
+      row.dataset.tabKey ?? null,
+      this.getDropPosition(row, event),
+    );
+  };
+
+  private readonly handleRowDragEnd = () => {
+    this.clearDragState();
   };
 
   private selectTrackedTabByKey(tabKey: string | null): void {
@@ -486,7 +706,11 @@ export default class VerticalTabSidebar {
     this.tracker.reconcile("failed-select");
   }
 
-  private showContextMenu(tabKey: string | null, screenX: number, screenY: number): void {
+  private showContextMenu(
+    tabKey: string | null,
+    screenX: number,
+    screenY: number,
+  ): void {
     if (!this.contextMenu || !tabKey) {
       return;
     }
@@ -544,6 +768,183 @@ export default class VerticalTabSidebar {
     while (this.contextMenu.firstChild) {
       this.contextMenu.removeChild(this.contextMenu.firstChild);
     }
+  }
+
+  private commitDrop(
+    targetTabKey: string | null,
+    position: DropPosition,
+  ): void {
+    const sourceTabKey = this.draggedTabKey;
+    this.clearDragState();
+
+    if (!sourceTabKey || !targetTabKey || sourceTabKey === targetTabKey) {
+      return;
+    }
+
+    if (this.isNoOpDropTarget(targetTabKey, position)) {
+      return;
+    }
+
+    const sourceTab = this.trackedTabsByKey.get(sourceTabKey);
+    const targetTab = this.trackedTabsByKey.get(targetTabKey);
+    if (!sourceTab?.tabId || !targetTab?.tabId) {
+      return;
+    }
+
+    const targetIndex = targetTab.nativeIndex + (position === "after" ? 1 : 0);
+    ztoolkit.log("VerticalTabSidebar move", {
+      sourceTabId: sourceTab.tabId,
+      sourceIndex: sourceTab.nativeIndex,
+      targetTabId: targetTab.tabId,
+      targetIndex,
+      position,
+    });
+
+    this.commandController.moveOpenTabs([sourceTab.tabId], targetIndex);
+    this.tracker.reconcile(`sidebar-move:${sourceTab.tabId}:${targetIndex}`);
+    this.tracker.scheduleDelayedReconcile(
+      `sidebar-move:${sourceTab.tabId}:${targetIndex}`,
+      [80, 220],
+    );
+  }
+
+  private getDropPosition(row: HTMLDivElement, event: DragEvent): DropPosition {
+    const rect = row.getBoundingClientRect();
+    const pointerY = event.clientY ?? rect.top;
+    const middleY = rect.top + rect.height / 2;
+    const rowTabKey = row.dataset.tabKey ?? null;
+
+    if (
+      rowTabKey &&
+      rowTabKey === this.dragOverTabKey &&
+      this.dragOverPosition &&
+      Math.abs(pointerY - middleY) <= DROP_POSITION_HYSTERESIS
+    ) {
+      return this.dragOverPosition;
+    }
+
+    return pointerY < middleY ? "before" : "after";
+  }
+
+  private setDropIndicator(
+    tabKey: string | null,
+    position: DropPosition | null,
+  ): void {
+    if (!tabKey || !position || tabKey === this.draggedTabKey) {
+      this.clearDropIndicator();
+      return;
+    }
+
+    if (this.isNoOpDropTarget(tabKey, position)) {
+      this.clearDropIndicator();
+      return;
+    }
+
+    if (this.dragOverTabKey === tabKey && this.dragOverPosition === position) {
+      this.updateDropIndicator();
+      return;
+    }
+
+    this.dragOverTabKey = tabKey;
+    this.dragOverPosition = position;
+    this.render(this.tracker.getSnapshot());
+  }
+
+  private clearDropIndicator(): void {
+    if (!this.dragOverTabKey && !this.dragOverPosition) {
+      this.updateDropIndicator();
+      return;
+    }
+
+    this.dragOverTabKey = null;
+    this.dragOverPosition = null;
+    this.render(this.tracker.getSnapshot());
+  }
+
+  private clearDragState(): void {
+    this.draggedTabKey = null;
+    this.dragOverTabKey = null;
+    this.dragOverPosition = null;
+    this.updateDropIndicator();
+  }
+
+  private updateDropIndicator(): void {
+    if (!this.listContainer) {
+      return;
+    }
+
+    const rows = this.listContainer.querySelectorAll(
+      ".tab-enhance-vertical-tab-row",
+    );
+    rows.forEach((node: Element) => {
+      const row = node as HTMLDivElement;
+      row.classList.remove("is-dragging");
+      const rowTabKey = row.dataset.tabKey ?? null;
+      if (rowTabKey && rowTabKey === this.draggedTabKey) {
+        row.classList.add("is-dragging");
+      }
+    });
+  }
+
+  private resolveDropTargetFromPoint(
+    clientY: number,
+  ): { tabKey: string | null; position: DropPosition } | null {
+    if (!this.listContainer) {
+      return null;
+    }
+
+    const rows = Array.from(
+      this.listContainer.querySelectorAll(".tab-enhance-vertical-tab-row"),
+    ) as HTMLDivElement[];
+    if (!rows.length) {
+      return null;
+    }
+
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      const middleY = rect.top + rect.height / 2;
+      if (clientY < middleY) {
+        return {
+          tabKey: row.dataset.tabKey ?? null,
+          position: "before",
+        };
+      }
+    }
+
+    const lastRow = rows[rows.length - 1];
+    return {
+      tabKey: lastRow.dataset.tabKey ?? null,
+      position: "after",
+    };
+  }
+
+  private getLastTabRow(): HTMLDivElement | null {
+    if (!this.listContainer) {
+      return null;
+    }
+
+    const last = this.listContainer.querySelector(
+      ".tab-enhance-vertical-tab-row:last-of-type",
+    );
+    return last ? (last as HTMLDivElement) : null;
+  }
+
+  private getRowFromEventTarget(
+    target: EventTarget | null,
+  ): HTMLDivElement | null {
+    const elementCtor = this.window.Element;
+    const divCtor = this.window.HTMLDivElement;
+    if (
+      !elementCtor ||
+      !divCtor ||
+      !target ||
+      !(target instanceof elementCtor)
+    ) {
+      return null;
+    }
+
+    const row = (target as Element).closest(".tab-enhance-vertical-tab-row");
+    return row ? (row as HTMLDivElement) : null;
   }
 
   private getBadgeText(tab: TrackedTab): string {

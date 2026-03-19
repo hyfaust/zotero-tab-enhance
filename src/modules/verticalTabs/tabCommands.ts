@@ -15,6 +15,11 @@ export interface TabCommandItem {
   handler: () => Promise<void> | void;
 }
 
+type NativeTabEntry = {
+  tab: _ZoteroTypes.TabInstance;
+  tabIndex: number;
+};
+
 function isReaderTab(tab: _ZoteroTypes.TabInstance | TrackedTab | null | undefined) {
   return Boolean(tab && (tab.type === "reader" || tab.type === "reader-unloaded"));
 }
@@ -47,6 +52,52 @@ export default class TabCommandController {
       this.window.Zotero_Tabs.close(tabId);
     } catch (error) {
       ztoolkit.log("TabCommandController.close failed", tabId, error);
+    }
+  }
+
+  public moveOpenTabs(tabIds: string[] | string | null, targetIndex: number): void {
+    const normalizedTabIds = Array.from(
+      new Set(
+        (Array.isArray(tabIds) ? tabIds : [tabIds]).filter(
+          (tabId): tabId is string => Boolean(tabId && tabId !== "zotero-pane"),
+        ),
+      ),
+    );
+    if (!normalizedTabIds.length || targetIndex < 1) {
+      return;
+    }
+
+    try {
+      if (normalizedTabIds.length === 1) {
+        this.window.Zotero_Tabs.move(normalizedTabIds[0], targetIndex);
+        return;
+      }
+
+      const entries = normalizedTabIds
+        .map((tabId) => this.getNativeTabEntry(tabId, false))
+        .filter((entry): entry is NativeTabEntry => Boolean(entry))
+        .sort((left, right) => left.tabIndex - right.tabIndex);
+      if (!entries.length) {
+        return;
+      }
+
+      let insertionIndex = targetIndex;
+      entries.forEach((entry) => {
+        if (entry.tabIndex < targetIndex) {
+          insertionIndex -= 1;
+        }
+      });
+      insertionIndex = Math.max(1, insertionIndex);
+
+      entries.forEach((entry, offset) => {
+        this.window.Zotero_Tabs.move(entry.tab.id, insertionIndex + offset);
+      });
+    } catch (error) {
+      ztoolkit.log("TabCommandController.moveOpenTabs failed", {
+        tabIds: normalizedTabIds,
+        targetIndex,
+        error,
+      });
     }
   }
 
@@ -185,12 +236,19 @@ export default class TabCommandController {
   }
 
   private getNativeTab(tabId: string | null, logError = true) {
+    return this.getNativeTabEntry(tabId, logError)?.tab ?? null;
+  }
+
+  private getNativeTabEntry(
+    tabId: string | null,
+    logError = true,
+  ): NativeTabEntry | null {
     if (!tabId) {
       return null;
     }
 
     try {
-      return this.window.Zotero_Tabs._getTab(tabId).tab;
+      return this.window.Zotero_Tabs._getTab(tabId);
     } catch (error) {
       if (logError) {
         ztoolkit.log("TabCommandController.getNativeTab failed", tabId, error);
