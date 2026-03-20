@@ -1,11 +1,13 @@
 import { config } from "../../../package.json";
 import { getString } from "../../utils/locale";
+import { getJSONPref, setJSONPref } from "../../utils/prefs";
 import TabTrackerService from "./tabTracker";
 import TabCommandController, { TabCommandItem } from "./tabCommands";
 import TabGroupStore from "./groupStore";
 import {
   GROUP_COLOR_PALETTE,
   LIBRARY_TAB_ID,
+  SidebarState,
   TabTrackerSnapshot,
   TrackedTab,
   VirtualGroup,
@@ -15,6 +17,8 @@ import {
 const DEFAULT_EXPANDED_WIDTH = 260;
 const COLLAPSED_WIDTH = 44;
 const DROP_POSITION_HYSTERESIS = 8;
+const SIDEBAR_STATE_PREF_KEY = "verticalTabs.sidebarState";
+const GROUPS_STATE_PREF_KEY = "verticalTabs.groups";
 
 type DropPosition = "before" | "after";
 type SidebarViewMode = "default" | "recent" | "type";
@@ -73,6 +77,7 @@ export default class VerticalTabSidebar {
     if (width >= 160) {
       this.expandedWidth = width;
       this.applySidebarWidth();
+      this.persistSidebarState();
     }
   };
 
@@ -147,9 +152,11 @@ export default class VerticalTabSidebar {
       return;
     }
 
+    this.restorePersistedState();
     this.initialized = true;
     this.unsubscribeGroupStore = this.groupStore.subscribe(() => {
       if (this.initialized) {
+        this.persistGroupsState();
         this.render(this.tracker.getSnapshot());
       }
     });
@@ -168,6 +175,9 @@ export default class VerticalTabSidebar {
     if (!this.initialized) {
       return;
     }
+
+    this.persistSidebarState();
+    this.persistGroupsState();
 
     this.unsubscribeTracker?.();
     this.unsubscribeTracker = undefined;
@@ -289,6 +299,7 @@ export default class VerticalTabSidebar {
           listener: (event: Event) => {
             const target = event.currentTarget as HTMLInputElement | null;
             this.searchQuery = target?.value.trim().toLocaleLowerCase() ?? "";
+            this.persistSidebarState();
             this.render(this.tracker.getSnapshot());
           },
         },
@@ -421,6 +432,7 @@ export default class VerticalTabSidebar {
     this.collapsed = !this.collapsed;
     this.hideContextMenu();
     this.applySidebarWidth();
+    this.persistSidebarState();
     this.render(this.tracker.getSnapshot());
   }
 
@@ -433,6 +445,7 @@ export default class VerticalTabSidebar {
     this.viewMode = mode;
     this.hideContextMenu();
     this.clearDragState();
+    this.persistSidebarState();
     this.render(this.tracker.getSnapshot());
   }
 
@@ -475,6 +488,177 @@ export default class VerticalTabSidebar {
       this.viewSwitcher?.removeAttribute("hidden");
       this.createGroupButton?.removeAttribute("hidden");
     }
+  }
+
+  private restorePersistedState(): void {
+    const sidebarState = getJSONPref<Partial<SidebarState>>(
+      SIDEBAR_STATE_PREF_KEY,
+      {},
+    );
+
+    if (typeof sidebarState.collapsed === "boolean") {
+      this.collapsed = sidebarState.collapsed;
+    }
+
+    if (
+      typeof sidebarState.width === "number" &&
+      Number.isFinite(sidebarState.width) &&
+      sidebarState.width >= 160
+    ) {
+      this.expandedWidth = Math.round(sidebarState.width);
+    }
+
+    if (typeof sidebarState.searchQuery === "string") {
+      this.searchQuery = sidebarState.searchQuery;
+      if (this.searchInput) {
+        this.searchInput.value = sidebarState.searchQuery;
+      }
+    }
+
+    if (this.isSidebarViewMode(sidebarState.viewMode)) {
+      this.viewMode = sidebarState.viewMode;
+    }
+
+    const restoredGroups = this.sanitizeGroups(
+      getJSONPref<VirtualGroup[]>(GROUPS_STATE_PREF_KEY, []),
+    );
+    if (restoredGroups.length > 0) {
+      this.groupStore.setGroups(restoredGroups);
+    }
+
+    this.applySidebarWidth();
+    this.updateViewSwitcher();
+  }
+
+  private persistSidebarState(): void {
+    const state: SidebarState = {
+      collapsed: this.collapsed,
+      width: this.expandedWidth,
+      searchQuery: this.searchQuery,
+      selectedKeys: [],
+      viewMode: this.viewMode,
+    };
+    setJSONPref(SIDEBAR_STATE_PREF_KEY, state);
+  }
+
+  private persistGroupsState(): void {
+    setJSONPref(GROUPS_STATE_PREF_KEY, this.groupStore.getGroups());
+  }
+
+  private sanitizeGroups(groups: VirtualGroup[]): VirtualGroup[] {
+    if (!Array.isArray(groups)) {
+      return [];
+    }
+
+    const seenGroupIds = new Set<string>();
+    return groups.flatMap((group, groupIndex) => {
+      if (!group || typeof group !== "object") {
+        return [];
+      }
+
+      const groupId =
+        typeof group.id === "string" && group.id.trim()
+          ? group.id
+          : `restored-group-${groupIndex}`;
+      if (seenGroupIds.has(groupId)) {
+        return [];
+      }
+      seenGroupIds.add(groupId);
+
+      const members = Array.isArray(group.members) ? group.members : [];
+      const normalizedMembers = members.flatMap((member, memberIndex) => {
+        if (!member || typeof member !== "object") {
+          return [];
+        }
+
+        const itemID =
+          typeof member.itemID === "number" ? member.itemID : null;
+        const parentItemID =
+          typeof member.parentItemID === "number" ? member.parentItemID : null;
+        const hasResolvableItem =
+          (itemID != null && Boolean(Zotero.Items.get(itemID))) ||
+          (parentItemID != null && Boolean(Zotero.Items.get(parentItemID)));
+
+        if ((itemID != null || parentItemID != null) && !hasResolvableItem) {
+          return [];
+        }
+
+        const memberKey =
+          typeof member.key === "string" && member.key.trim()
+            ? member.key
+            : null;
+        if (!memberKey) {
+          return [];
+        }
+
+        return [
+          {
+            id:
+              typeof member.id === "string" && member.id.trim()
+                ? member.id
+                : `restored-member-${groupIndex}-${memberIndex}`,
+            key: memberKey,
+            sourceTabKey:
+              typeof member.sourceTabKey === "string" && member.sourceTabKey.trim()
+                ? member.sourceTabKey
+                : null,
+            tabId:
+              typeof member.tabId === "string" && member.tabId.trim()
+                ? member.tabId
+                : null,
+            type:
+              typeof member.type === "string" && member.type.trim()
+                ? member.type
+                : "reader",
+            title:
+              typeof member.title === "string" && member.title.trim()
+                ? member.title
+                : memberKey,
+            itemID,
+            parentItemID,
+            isOpen: Boolean(member.isOpen),
+            openedAt:
+              typeof member.openedAt === "number" && Number.isFinite(member.openedAt)
+                ? member.openedAt
+                : null,
+            iconKey:
+              typeof member.iconKey === "string" && member.iconKey.trim()
+                ? member.iconKey
+                : "reader",
+          },
+        ];
+      });
+
+      if (!normalizedMembers.length) {
+        return [];
+      }
+
+      return [
+        {
+          id: groupId,
+          name:
+            typeof group.name === "string" && group.name.trim()
+              ? group.name.trim()
+              : getString("new-group"),
+          color:
+            typeof group.color === "string" && group.color.trim()
+              ? group.color
+              : GROUP_COLOR_PALETTE[groupIndex % GROUP_COLOR_PALETTE.length],
+          collapsed: Boolean(group.collapsed),
+          sortMode:
+            group.sortMode === "recent" ||
+            group.sortMode === "type" ||
+            group.sortMode === "manual"
+              ? group.sortMode
+              : "manual",
+          members: normalizedMembers,
+        },
+      ];
+    });
+  }
+
+  private isSidebarViewMode(value: unknown): value is SidebarViewMode {
+    return value === "default" || value === "recent" || value === "type";
   }
 
   private render(snapshot: TabTrackerSnapshot): void {

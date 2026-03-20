@@ -36,6 +36,14 @@ export default class TabGroupStore {
     }));
   }
 
+  public setGroups(groups: VirtualGroup[]): void {
+    this.groups = groups.map((group) => ({
+      ...group,
+      members: group.members.map((member) => ({ ...member })),
+    }));
+    this.emit();
+  }
+
   public syncTrackedTabs(tabs: TrackedTab[]): void {
     const openTabsByMemberKey = new Map(
       tabs.map((tab) => [this.makeMemberKeyFromTab(tab), tab] as const),
@@ -103,7 +111,9 @@ export default class TabGroupStore {
         return group;
       }
 
-      const existingIndex = group.members.findIndex((item) => item.key === member.key);
+      const existingIndex = group.members.findIndex(
+        (item) => item.key === member.key,
+      );
       changed = true;
       if (existingIndex >= 0) {
         const members = [...group.members];
@@ -137,7 +147,9 @@ export default class TabGroupStore {
           return group;
         }
 
-        const members = group.members.filter((member) => member.key !== memberKey);
+        const members = group.members.filter(
+          (member) => member.key !== memberKey,
+        );
         if (members.length === group.members.length) {
           return group;
         }

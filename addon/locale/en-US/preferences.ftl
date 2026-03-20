@@ -1,5 +1,10 @@
 pref-help = { $name } Build { $version } { $time }
-pref-enable-features = Enable TabEnhance Features
+pref-feature-groups = Feature Modules
+pref-context-menu-features = Horizontal Tab Context Menu Actions
+pref-enable-vertical-tabs =
+    .label = Enable Vertical Tabs Sidebar
+pref-enable-horizontal-tab-enhance =
+    .label = Enable Horizontal Tab Context Menu Enhance
 pref-enable-copy-reference =
     .label = Enable Copy Reference
 pref-enable-go-to-attachment =

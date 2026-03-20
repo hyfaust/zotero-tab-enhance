@@ -52,17 +52,6 @@ export class BasicExampleFactory {
   }
 
   @example
-  static exampleNotifierCallback() {
-    new ztoolkit.ProgressWindow(addon.data.config.addonName)
-      .createLine({
-        text: "Open Tab Detected!",
-        type: "success",
-        progress: 100,
-      })
-      .show();
-  }
-
-  @example
   private static unregisterNotifier(notifierID: string) {
     Zotero.Notifier.unregisterObserver(notifierID);
   }
