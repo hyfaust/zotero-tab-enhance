@@ -87,6 +87,31 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, #f6b433 18%, transparent);
 }
 
+.tab-enhance-vertical-tabs-view-switcher {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px 6px;
+}
+
+.tab-enhance-vertical-tabs-view-button {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab-enhance-vertical-tabs-view-button.is-active {
+  background: color-mix(in srgb, #f6b433 22%, white);
+  color: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #f6b433 28%, transparent);
+}
+
 .tab-enhance-vertical-tabs-list {
   display: flex;
   flex: 1;
@@ -166,6 +191,39 @@
   padding-left: 14px;
   border-left: 1px dashed color-mix(in srgb, var(--group-color, #f6b433) 28%, transparent);
   margin-left: 11px;
+}
+
+.tab-enhance-vertical-aggregate-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.tab-enhance-vertical-aggregate-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  padding: 0 6px;
+}
+
+.tab-enhance-vertical-aggregate-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, currentColor 58%, transparent);
+}
+
+.tab-enhance-vertical-aggregate-count {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: 10px;
+  text-align: center;
+  color: color-mix(in srgb, currentColor 62%, transparent);
 }
 
 .tab-enhance-vertical-tab-row {
@@ -301,6 +359,7 @@
 }
 
 .tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-tabs-search,
+.tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-tabs-view-switcher,
 .tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-tabs-create-group {
   display: none;
 }
