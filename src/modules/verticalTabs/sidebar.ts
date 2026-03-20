@@ -17,6 +17,7 @@ const COLLAPSED_WIDTH = 44;
 const DROP_POSITION_HYSTERESIS = 8;
 
 type DropPosition = "before" | "after";
+type SidebarViewMode = "default" | "recent" | "type";
 
 type ContextMenuTarget =
   | { kind: "tab"; tabKey: string }
@@ -26,6 +27,12 @@ type ContextMenuTarget =
 type RenderableGroup = {
   group: VirtualGroup;
   members: VirtualGroupMember[];
+};
+
+type AggregateSection = {
+  id: string;
+  title: string;
+  tabs: TrackedTab[];
 };
 
 export default class VerticalTabSidebar {
@@ -38,10 +45,12 @@ export default class VerticalTabSidebar {
   private collapsed = false;
   private expandedWidth = DEFAULT_EXPANDED_WIDTH;
   private searchQuery = "";
+  private viewMode: SidebarViewMode = "default";
   private sidebar?: XULElement;
   private splitter?: XULElement;
   private toggleButton?: XULElement;
   private createGroupButton?: HTMLButtonElement;
+  private viewSwitcher?: HTMLElement;
   private headerTitle?: HTMLElement;
   private countBadge?: HTMLElement;
   private listContainer?: HTMLElement;
@@ -145,7 +154,9 @@ export default class VerticalTabSidebar {
       }
     });
     this.unsubscribeTracker = this.tracker.subscribe((snapshot) => {
-      this.groupStore.syncTrackedTabs(snapshot.tabs.map((tab) => this.normalizeTab(tab)));
+      this.groupStore.syncTrackedTabs(
+        snapshot.tabs.map((tab) => this.normalizeTab(tab)),
+      );
       this.render(snapshot);
     });
     this.window.addEventListener("mouseup", this.handleResizeEnd);
@@ -173,6 +184,7 @@ export default class VerticalTabSidebar {
     this.splitter = undefined;
     this.toggleButton = undefined;
     this.createGroupButton = undefined;
+    this.viewSwitcher = undefined;
     this.headerTitle = undefined;
     this.countBadge = undefined;
     this.listContainer = undefined;
@@ -241,24 +253,28 @@ export default class VerticalTabSidebar {
       },
     }) as HTMLDivElement;
 
-    const createGroupButton = ztoolkit.UI.createElement(this.document, "button", {
-      namespace: "html",
-      classList: ["tab-enhance-vertical-tabs-create-group"],
-      properties: {
-        textContent: "+",
-        title: getString("create-group-from-selection"),
-      },
-      listeners: [
-        {
-          type: "click",
-          listener: (event: Event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            this.createGroupFromSelectedTab();
-          },
+    const createGroupButton = ztoolkit.UI.createElement(
+      this.document,
+      "button",
+      {
+        namespace: "html",
+        classList: ["tab-enhance-vertical-tabs-create-group"],
+        properties: {
+          textContent: "+",
+          title: getString("create-group-from-selection"),
         },
-      ],
-    }) as HTMLButtonElement;
+        listeners: [
+          {
+            type: "click",
+            listener: (event: Event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              this.createGroupFromSelectedTab();
+            },
+          },
+        ],
+      },
+    ) as HTMLButtonElement;
 
     const searchInput = ztoolkit.UI.createElement(this.document, "input", {
       namespace: "html",
@@ -278,6 +294,43 @@ export default class VerticalTabSidebar {
         },
       ],
     }) as HTMLInputElement;
+
+    const viewSwitcher = ztoolkit.UI.createElement(this.document, "div", {
+      namespace: "html",
+      classList: ["tab-enhance-vertical-tabs-view-switcher"],
+    }) as HTMLDivElement;
+
+    (
+      [
+        ["default", getString("view-default")],
+        ["recent", getString("view-recent")],
+        ["type", getString("view-type")],
+      ] as const
+    ).forEach(([mode, label]) => {
+      const button = ztoolkit.UI.createElement(this.document, "button", {
+        namespace: "html",
+        classList: ["tab-enhance-vertical-tabs-view-button"],
+        properties: {
+          textContent: label,
+          title: label,
+        },
+        attributes: {
+          type: "button",
+          "data-view-mode": mode,
+        },
+        listeners: [
+          {
+            type: "click",
+            listener: (event: Event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              this.setViewMode(mode);
+            },
+          },
+        ],
+      }) as HTMLButtonElement;
+      viewSwitcher.appendChild(button);
+    });
 
     const listContainer = ztoolkit.UI.createElement(this.document, "div", {
       namespace: "html",
@@ -310,6 +363,7 @@ export default class VerticalTabSidebar {
     header.appendChild(createGroupButton);
     sidebar.appendChild(header);
     sidebar.appendChild(searchInput);
+    sidebar.appendChild(viewSwitcher);
     sidebar.appendChild(listContainer);
 
     const popupHost =
@@ -331,6 +385,7 @@ export default class VerticalTabSidebar {
     this.splitter = splitter;
     this.toggleButton = toggleButton;
     this.createGroupButton = createGroupButton;
+    this.viewSwitcher = viewSwitcher;
     this.headerTitle = headerText;
     this.countBadge = countBadge;
     this.searchInput = searchInput;
@@ -369,6 +424,35 @@ export default class VerticalTabSidebar {
     this.render(this.tracker.getSnapshot());
   }
 
+  private setViewMode(mode: SidebarViewMode): void {
+    if (this.viewMode === mode) {
+      this.updateViewSwitcher();
+      return;
+    }
+
+    this.viewMode = mode;
+    this.hideContextMenu();
+    this.clearDragState();
+    this.render(this.tracker.getSnapshot());
+  }
+
+  private updateViewSwitcher(): void {
+    if (!this.viewSwitcher) {
+      return;
+    }
+
+    const buttons = this.viewSwitcher.querySelectorAll(
+      ".tab-enhance-vertical-tabs-view-button",
+    );
+    buttons.forEach((node: Element) => {
+      const button = node as HTMLButtonElement;
+      const mode = button.dataset.viewMode as SidebarViewMode | undefined;
+      const isActive = mode === this.viewMode;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+  }
+
   private applySidebarWidth(): void {
     if (!this.sidebar || !this.splitter) {
       return;
@@ -381,12 +465,14 @@ export default class VerticalTabSidebar {
       this.sidebar.style.width = `${COLLAPSED_WIDTH}px`;
       this.splitter.setAttribute("hidden", "true");
       this.searchInput?.setAttribute("hidden", "true");
+      this.viewSwitcher?.setAttribute("hidden", "true");
       this.createGroupButton?.setAttribute("hidden", "true");
     } else {
       this.sidebar.classList.remove("is-collapsed");
       this.sidebar.style.width = `${this.expandedWidth}px`;
       this.splitter.removeAttribute("hidden");
       this.searchInput?.removeAttribute("hidden");
+      this.viewSwitcher?.removeAttribute("hidden");
       this.createGroupButton?.removeAttribute("hidden");
     }
   }
@@ -399,32 +485,47 @@ export default class VerticalTabSidebar {
     const openTabs = snapshot.tabs
       .map((tab) => this.normalizeTab(tab))
       .filter((tab) => this.shouldRenderTab(tab));
+    const renderableGroups = this.getRenderableGroups(openTabs);
     const visibleUngroupedTabs = this.groupStore
       .getUngroupedTabs(openTabs)
       .filter((tab) => this.matchesSearch(tab));
-    const renderableGroups = this.getRenderableGroups(openTabs);
+    const aggregateSections = this.getAggregateSections(openTabs);
     const listContainer = this.listContainer;
 
     this.trackedTabsByKey.clear();
     this.trackedTabsByMemberKey.clear();
     openTabs.forEach((tab) => {
       this.trackedTabsByKey.set(tab.key, tab);
-      this.trackedTabsByMemberKey.set(this.groupStore.makeMemberKeyFromTab(tab), tab);
+      this.trackedTabsByMemberKey.set(
+        this.groupStore.makeMemberKeyFromTab(tab),
+        tab,
+      );
     });
 
     this.hideContextMenu();
-    this.headerTitle.textContent = this.collapsed ? "" : "Tabs";
+    this.updateViewSwitcher();
+    this.headerTitle.textContent = this.collapsed ? "" : this.getViewTitle();
     this.countBadge.textContent = String(openTabs.length);
     listContainer.textContent = "";
 
     if (
       this.draggedTabKey &&
-      !visibleUngroupedTabs.some((tab) => tab.key === this.draggedTabKey)
+      (this.viewMode !== "default" ||
+        !visibleUngroupedTabs.some((tab) => tab.key === this.draggedTabKey))
     ) {
       this.clearDragState();
     }
 
-    if (renderableGroups.length === 0 && visibleUngroupedTabs.length === 0) {
+    const hasDefaultContent =
+      renderableGroups.length > 0 || visibleUngroupedTabs.length > 0;
+    const hasAggregateContent = aggregateSections.some(
+      (section) => section.tabs.length > 0,
+    );
+
+    if (
+      (this.viewMode === "default" && !hasDefaultContent) ||
+      (this.viewMode !== "default" && !hasAggregateContent)
+    ) {
       const emptyState = ztoolkit.UI.createElement(this.document, "div", {
         namespace: "html",
         classList: ["tab-enhance-vertical-tabs-empty"],
@@ -440,34 +541,176 @@ export default class VerticalTabSidebar {
       return;
     }
 
-    renderableGroups.forEach((renderableGroup) => {
+    if (this.viewMode === "default") {
+      renderableGroups.forEach((renderableGroup) => {
+        listContainer.appendChild(
+          this.renderGroupSection(renderableGroup, snapshot.selectedTabKey),
+        );
+      });
+
+      visibleUngroupedTabs.forEach((tab) => {
+        if (
+          tab.key === this.dragOverTabKey &&
+          this.dragOverPosition === "before"
+        ) {
+          listContainer.appendChild(this.renderDropPlaceholder());
+        }
+
+        listContainer.appendChild(
+          this.renderTabRow(tab, snapshot.selectedTabKey, {
+            sortable: true,
+            grouped: false,
+          }),
+        );
+
+        if (
+          tab.key === this.dragOverTabKey &&
+          this.dragOverPosition === "after"
+        ) {
+          listContainer.appendChild(this.renderDropPlaceholder());
+        }
+      });
+      return;
+    }
+
+    aggregateSections.forEach((section) => {
+      if (!section.tabs.length) {
+        return;
+      }
       listContainer.appendChild(
-        this.renderGroupSection(renderableGroup, snapshot.selectedTabKey),
+        this.renderAggregateSection(section, snapshot.selectedTabKey),
       );
     });
+  }
 
-    visibleUngroupedTabs.forEach((tab) => {
-      if (
-        tab.key === this.dragOverTabKey &&
-        this.dragOverPosition === "before"
-      ) {
-        listContainer.appendChild(this.renderDropPlaceholder());
+  private getViewTitle(): string {
+    switch (this.viewMode) {
+      case "recent":
+        return getString("view-recent");
+      case "type":
+        return getString("view-type");
+      default:
+        return getString("view-default");
+    }
+  }
+
+  private getAggregateSections(openTabs: TrackedTab[]): AggregateSection[] {
+    const filteredTabs = openTabs.filter((tab) => this.matchesSearch(tab));
+    if (this.viewMode === "recent") {
+      return this.buildRecentSections(filteredTabs);
+    }
+    if (this.viewMode === "type") {
+      return this.buildTypeSections(filteredTabs);
+    }
+    return [];
+  }
+
+  private buildRecentSections(tabs: TrackedTab[]): AggregateSection[] {
+    const now = Date.now();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const sections: AggregateSection[] = [
+      { id: "recent-now", title: getString("recent-just-now"), tabs: [] },
+      { id: "recent-today", title: getString("recent-today"), tabs: [] },
+      { id: "recent-earlier", title: getString("recent-earlier"), tabs: [] },
+    ];
+
+    tabs
+      .slice()
+      .sort((left, right) => (right.openedAt ?? 0) - (left.openedAt ?? 0))
+      .forEach((tab) => {
+        const openedAt = tab.openedAt ?? 0;
+        if (openedAt && now - openedAt <= 10 * 60 * 1000) {
+          sections[0].tabs.push(tab);
+          return;
+        }
+        if (openedAt && openedAt >= startOfToday.getTime()) {
+          sections[1].tabs.push(tab);
+          return;
+        }
+        sections[2].tabs.push(tab);
+      });
+
+    return sections;
+  }
+
+  private buildTypeSections(tabs: TrackedTab[]): AggregateSection[] {
+    const sectionMap = new Map<string, AggregateSection>();
+    tabs.forEach((tab) => {
+      const sectionId = tab.type || "unknown";
+      if (!sectionMap.has(sectionId)) {
+        sectionMap.set(sectionId, {
+          id: `type-${sectionId}`,
+          title: this.getTypeSectionTitle(sectionId),
+          tabs: [],
+        });
       }
+      sectionMap.get(sectionId)?.tabs.push(tab);
+    });
 
-      listContainer.appendChild(
-        this.renderTabRow(tab, snapshot.selectedTabKey, {
-          sortable: true,
+    return Array.from(sectionMap.values()).sort((left, right) =>
+      left.title.localeCompare(right.title),
+    );
+  }
+
+  private getTypeSectionTitle(type: string): string {
+    switch (type) {
+      case "reader":
+      case "reader-unloaded":
+        return getString("type-reader");
+      case "note":
+        return getString("type-note");
+      case "web":
+        return getString("type-web");
+      default:
+        return getString("type-other", { args: { type } });
+    }
+  }
+
+  private renderAggregateSection(
+    section: AggregateSection,
+    selectedTabKey: string | null,
+  ): HTMLElement {
+    const container = ztoolkit.UI.createElement(this.document, "div", {
+      namespace: "html",
+      classList: ["tab-enhance-vertical-aggregate-section"],
+    }) as HTMLDivElement;
+
+    const header = ztoolkit.UI.createElement(this.document, "div", {
+      namespace: "html",
+      classList: ["tab-enhance-vertical-aggregate-header"],
+    }) as HTMLDivElement;
+
+    const title = ztoolkit.UI.createElement(this.document, "span", {
+      namespace: "html",
+      classList: ["tab-enhance-vertical-aggregate-title"],
+      properties: {
+        textContent: this.collapsed ? "" : section.title,
+      },
+    }) as HTMLSpanElement;
+
+    const count = ztoolkit.UI.createElement(this.document, "span", {
+      namespace: "html",
+      classList: ["tab-enhance-vertical-aggregate-count"],
+      properties: {
+        textContent: String(section.tabs.length),
+      },
+    }) as HTMLSpanElement;
+
+    header.appendChild(title);
+    header.appendChild(count);
+    container.appendChild(header);
+
+    section.tabs.forEach((tab) => {
+      container.appendChild(
+        this.renderTabRow(tab, selectedTabKey, {
+          sortable: false,
           grouped: false,
         }),
       );
-
-      if (
-        tab.key === this.dragOverTabKey &&
-        this.dragOverPosition === "after"
-      ) {
-        listContainer.appendChild(this.renderDropPlaceholder());
-      }
     });
+
+    return container;
   }
 
   private renderGroupSection(
@@ -570,7 +813,11 @@ export default class VerticalTabSidebar {
 
       renderable.members.forEach((member) => {
         members.appendChild(
-          this.renderGroupMemberRow(member, renderable.group.id, selectedTabKey),
+          this.renderGroupMemberRow(
+            member,
+            renderable.group.id,
+            selectedTabKey,
+          ),
         );
       });
 
@@ -583,7 +830,9 @@ export default class VerticalTabSidebar {
   private getRenderableGroups(openTabs: TrackedTab[]): RenderableGroup[] {
     const groups = this.groupStore.getGroups();
     const openTabMap = new Map(
-      openTabs.map((tab) => [this.groupStore.makeMemberKeyFromTab(tab), tab] as const),
+      openTabs.map(
+        (tab) => [this.groupStore.makeMemberKeyFromTab(tab), tab] as const,
+      ),
     );
 
     return groups
@@ -654,9 +903,9 @@ export default class VerticalTabSidebar {
       return false;
     }
 
-    const visibleKeys = this.getVisibleSortableTabs(this.tracker.getSnapshot()).map(
-      (tab) => tab.key,
-    );
+    const visibleKeys = this.getVisibleSortableTabs(
+      this.tracker.getSnapshot(),
+    ).map((tab) => tab.key);
     const sourceIndex = visibleKeys.indexOf(this.draggedTabKey);
     const targetIndex = visibleKeys.indexOf(targetTabKey);
     if (sourceIndex < 0 || targetIndex < 0) {
@@ -697,7 +946,8 @@ export default class VerticalTabSidebar {
       return true;
     }
 
-    const haystack = `${tab.title} ${this.getMetaText(tab)}`.toLocaleLowerCase();
+    const haystack =
+      `${tab.title} ${this.getMetaText(tab)}`.toLocaleLowerCase();
     return haystack.includes(this.searchQuery);
   }
 
@@ -710,13 +960,17 @@ export default class VerticalTabSidebar {
   }
 
   private matchesGroupMember(
-    member: Pick<VirtualGroupMember, "title" | "type" | "itemID" | "parentItemID" | "isOpen">,
+    member: Pick<
+      VirtualGroupMember,
+      "title" | "type" | "itemID" | "parentItemID" | "isOpen"
+    >,
   ): boolean {
     if (!this.searchQuery) {
       return true;
     }
 
-    const haystack = `${member.title} ${this.getVirtualMemberMetaText(member)}`.toLocaleLowerCase();
+    const haystack =
+      `${member.title} ${this.getVirtualMemberMetaText(member)}`.toLocaleLowerCase();
     return haystack.includes(this.searchQuery);
   }
 
@@ -835,7 +1089,10 @@ export default class VerticalTabSidebar {
 
     row.appendChild(this.renderBadge(member.iconKey));
     row.appendChild(
-      this.renderRowContent(member.title, this.getVirtualMemberMetaText(member)),
+      this.renderRowContent(
+        member.title,
+        this.getVirtualMemberMetaText(member),
+      ),
     );
 
     return row;
@@ -933,14 +1190,11 @@ export default class VerticalTabSidebar {
 
     const groupId = row.dataset.groupId ?? null;
     const memberKey = row.dataset.memberKey ?? null;
-    const target: ContextMenuTarget = groupId && memberKey
-      ? { kind: "group-member", groupId, memberKey }
-      : { kind: "tab", tabKey: row.dataset.tabKey ?? "" };
-    this.showContextMenu(
-      target,
-      event.screenX,
-      event.screenY,
-    );
+    const target: ContextMenuTarget =
+      groupId && memberKey
+        ? { kind: "group-member", groupId, memberKey }
+        : { kind: "tab", tabKey: row.dataset.tabKey ?? "" };
+    this.showContextMenu(target, event.screenX, event.screenY);
   };
 
   private readonly handleVirtualMemberContextMenu = (event: MouseEvent) => {
@@ -1112,27 +1366,38 @@ export default class VerticalTabSidebar {
     groupId: string,
     memberKey: string,
   ): Promise<void> {
+    await this.ensureGroupMemberOpen(groupId, memberKey, true);
+  }
+
+  private async ensureGroupMemberOpen(
+    groupId: string,
+    memberKey: string,
+    selectIfAlreadyOpen: boolean,
+  ): Promise<boolean> {
     const liveTab = this.trackedTabsByMemberKey.get(memberKey) ?? null;
     if (liveTab?.tabId) {
-      this.selectTrackedTab(liveTab);
-      return;
+      if (selectIfAlreadyOpen) {
+        this.selectTrackedTab(liveTab);
+      }
+      return true;
     }
 
     const group = this.groupStore.findGroupById(groupId);
-    const member = group?.members.find((item) => item.key === memberKey) ?? null;
+    const member =
+      group?.members.find((item) => item.key === memberKey) ?? null;
     if (!member) {
-      return;
+      return false;
     }
 
     const preferredItemID = member.itemID ?? member.parentItemID;
     if (preferredItemID == null) {
-      return;
+      return false;
     }
 
     try {
       let item = Zotero.Items.get(preferredItemID);
       if (!item) {
-        return;
+        return false;
       }
 
       if (!item.isFileAttachment?.()) {
@@ -1147,13 +1412,60 @@ export default class VerticalTabSidebar {
         `group-member-open:${member.key}`,
         [80, 220, 480],
       );
+      return true;
     } catch (error) {
       ztoolkit.log("VerticalTabSidebar activateGroupMember failed", {
         groupId,
         memberKey,
         error,
       });
+      return false;
     }
+  }
+
+  private async openGroupMembers(
+    groupId: string,
+    options: { closeOthers?: boolean } = {},
+  ): Promise<void> {
+    const group = this.groupStore.findGroupById(groupId);
+    if (!group) {
+      return;
+    }
+
+    if (options.closeOthers) {
+      const memberKeys = new Set(group.members.map((member) => member.key));
+      this.tracker
+        .getTabs()
+        .map((tab) => this.normalizeTab(tab))
+        .filter((tab) => this.shouldRenderTab(tab))
+        .forEach((tab) => {
+          const tabMemberKey = this.groupStore.makeMemberKeyFromTab(tab);
+          if (!memberKeys.has(tabMemberKey) && tab.tabId) {
+            this.commandController.close(tab.tabId);
+          }
+        });
+      this.tracker.scheduleDelayedReconcile(
+        `group-close-others:${groupId}`,
+        [80, 220],
+      );
+    }
+
+    for (const member of group.members) {
+      await this.ensureGroupMemberOpen(groupId, member.key, false);
+      await this.wait(80);
+    }
+
+    this.tracker.reconcile(`group-open-all:${groupId}`);
+    this.tracker.scheduleDelayedReconcile(
+      `group-open-all:${groupId}`,
+      [120, 320, 640],
+    );
+  }
+
+  private wait(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      this.window.setTimeout(resolve, ms);
+    });
   }
 
   private showContextMenu(
@@ -1194,7 +1506,9 @@ export default class VerticalTabSidebar {
 
     this.commandController
       .getContextMenuItems(tracked.tabId)
-      .forEach((item) => this.contextMenu?.appendChild(this.renderContextMenuItem(item)));
+      .forEach((item) =>
+        this.contextMenu?.appendChild(this.renderContextMenuItem(item)),
+      );
 
     this.appendSeparator();
     this.appendMenuItem(getString("create-group"), () => {
@@ -1215,9 +1529,13 @@ export default class VerticalTabSidebar {
     }
   }
 
-  private populateGroupMemberContextMenu(groupId: string, memberKey: string): void {
+  private populateGroupMemberContextMenu(
+    groupId: string,
+    memberKey: string,
+  ): void {
     const group = this.groupStore.findGroupById(groupId);
-    const member = group?.members.find((item) => item.key === memberKey) ?? null;
+    const member =
+      group?.members.find((item) => item.key === memberKey) ?? null;
     if (!group || !member || !this.contextMenu) {
       return;
     }
@@ -1226,7 +1544,9 @@ export default class VerticalTabSidebar {
     if (liveTab) {
       this.commandController
         .getContextMenuItems(liveTab.tabId)
-        .forEach((item) => this.contextMenu?.appendChild(this.renderContextMenuItem(item)));
+        .forEach((item) =>
+          this.contextMenu?.appendChild(this.renderContextMenuItem(item)),
+        );
       this.appendSeparator();
     }
 
@@ -1241,6 +1561,16 @@ export default class VerticalTabSidebar {
       return;
     }
 
+    this.appendMenuItem(getString("open-group-all"), async () => {
+      await this.openGroupMembers(group.id);
+    });
+    this.appendMenuItem(getString("open-group-only"), async () => {
+      await this.openGroupMembers(group.id, { closeOthers: true });
+    });
+    this.appendMenuItem(getString("expand-only-group"), () => {
+      this.groupStore.expandOnly(group.id);
+    });
+    this.appendSeparator();
     this.appendMenuItem(
       group.collapsed ? getString("expand-group") : getString("collapse-group"),
       () => this.groupStore.toggleCollapsed(group.id),
@@ -1260,17 +1590,27 @@ export default class VerticalTabSidebar {
   }
 
   private renderContextMenuItem(item: TabCommandItem): XULElement {
-    return this.createMenuItem(item.label, async () => {
-      this.hideContextMenu();
-      if (item.disabled) {
-        return;
-      }
-      await item.handler();
-    }, Boolean(item.disabled));
+    return this.createMenuItem(
+      item.label,
+      async () => {
+        this.hideContextMenu();
+        if (item.disabled) {
+          return;
+        }
+        await item.handler();
+      },
+      Boolean(item.disabled),
+    );
   }
 
-  private appendMenuItem(label: string, handler: () => void | Promise<void>, disabled = false): void {
-    this.contextMenu?.appendChild(this.createMenuItem(label, handler, disabled));
+  private appendMenuItem(
+    label: string,
+    handler: () => void | Promise<void>,
+    disabled = false,
+  ): void {
+    this.contextMenu?.appendChild(
+      this.createMenuItem(label, handler, disabled),
+    );
   }
 
   private appendSeparator(): void {
@@ -1298,7 +1638,12 @@ export default class VerticalTabSidebar {
 
     groups.forEach((group) => {
       popup.appendChild(
-        this.createMenuItem(group.name, handlerFactory(group), false, group.color),
+        this.createMenuItem(
+          group.name,
+          handlerFactory(group),
+          false,
+          group.color,
+        ),
       );
     });
 
@@ -1532,7 +1877,10 @@ export default class VerticalTabSidebar {
   }
 
   private promptForGroupName(defaultValue: string): string | null {
-    const value = this.window.prompt(getString("group-name-prompt"), defaultValue);
+    const value = this.window.prompt(
+      getString("group-name-prompt"),
+      defaultValue,
+    );
     if (value === null) {
       return null;
     }
@@ -1565,7 +1913,10 @@ export default class VerticalTabSidebar {
   }
 
   private getVirtualMemberMetaText(
-    member: Pick<VirtualGroupMember, "type" | "itemID" | "parentItemID" | "isOpen">,
+    member: Pick<
+      VirtualGroupMember,
+      "type" | "itemID" | "parentItemID" | "isOpen"
+    >,
   ): string {
     const parts = [member.isOpen ? member.type : `${member.type} · virtual`];
     if (member.parentItemID != null && member.parentItemID !== member.itemID) {
