@@ -1,5 +1,5 @@
 import { config } from "../package.json";
-import { ColumnOptions, DialogHelper } from "zotero-plugin-toolkit";
+import { DialogHelper } from "zotero-plugin-toolkit";
 import hooks from "./hooks";
 import TabEnhance from "./modules/tabEnhance";
 import VerticalTabSidebar from "./modules/verticalTabs/sidebar";
@@ -19,8 +19,7 @@ class Addon {
     };
     prefs?: {
       window: Window;
-      columns: Array<ColumnOptions>;
-      rows: Array<{ [dataKey: string]: string }>;
+      bound?: boolean;
     };
     dialog?: DialogHelper;
     tabNotifierID?: string;

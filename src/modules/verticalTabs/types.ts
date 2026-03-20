@@ -18,6 +18,7 @@ export interface SidebarState {
   width: number | null;
   searchQuery: string;
   selectedKeys: string[];
+  viewMode: "default" | "recent" | "type";
 }
 
 export interface VirtualGroupMember {

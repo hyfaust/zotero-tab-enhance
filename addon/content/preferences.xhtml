@@ -1,10 +1,22 @@
 <linkset>
   <html:link rel="localization" href="__addonRef__-preferences.ftl" />
 </linkset>
-<groupbox
-  onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
->
-  <label><html:h2 data-l10n-id="pref-enable-features"></html:h2></label>
+<groupbox onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })">
+  <label><html:h2 data-l10n-id="pref-feature-groups"></html:h2></label>
+  <checkbox
+    id="__addonRef__-pref-enable-vertical-tabs"
+    data-l10n-id="pref-enable-vertical-tabs"
+    preference="__prefsPrefix__.enableVerticalTabs"
+  />
+  <checkbox
+    id="__addonRef__-pref-enable-horizontal-tab-enhance"
+    data-l10n-id="pref-enable-horizontal-tab-enhance"
+    preference="__prefsPrefix__.enableHorizontalTabEnhance"
+  />
+</groupbox>
+
+<groupbox>
+  <label><html:h2 data-l10n-id="pref-context-menu-features"></html:h2></label>
   <checkbox
     id="__addonRef__-pref-enable-copy-reference"
     data-l10n-id="pref-enable-copy-reference"

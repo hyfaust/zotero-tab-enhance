@@ -7,6 +7,8 @@
 declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
+      "enableVerticalTabs": boolean;
+      "enableHorizontalTabEnhance": boolean;
       "enableCopyReference": boolean;
       "enableGoToAttachment": boolean;
       "enableReloadTab": boolean;
