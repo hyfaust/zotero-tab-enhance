@@ -1,0 +1,290 @@
+import {
+  GROUP_COLOR_PALETTE,
+  TrackedTab,
+  VirtualGroup,
+  VirtualGroupMember,
+  makeVirtualMemberKey,
+} from "./types";
+
+type GroupStoreListener = (groups: VirtualGroup[]) => void;
+
+export default class TabGroupStore {
+  private groups: VirtualGroup[] = [];
+  private listeners = new Set<GroupStoreListener>();
+
+  constructor(_window: _ZoteroTypes.MainWindow) {
+    void _window;
+  }
+
+  public subscribe(listener: GroupStoreListener): () => void {
+    this.listeners.add(listener);
+    listener(this.getGroups());
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  public destroy(): void {
+    this.groups = [];
+    this.listeners.clear();
+  }
+
+  public getGroups(): VirtualGroup[] {
+    return this.groups.map((group) => ({
+      ...group,
+      members: group.members.map((member) => ({ ...member })),
+    }));
+  }
+
+  public syncTrackedTabs(tabs: TrackedTab[]): void {
+    const openTabsByMemberKey = new Map(
+      tabs.map((tab) => [this.makeMemberKeyFromTab(tab), tab] as const),
+    );
+    let changed = false;
+
+    this.groups = this.groups.map((group) => ({
+      ...group,
+      members: group.members.map((member) => {
+        const liveTab = openTabsByMemberKey.get(member.key);
+        if (!liveTab) {
+          if (!member.isOpen || (!member.sourceTabKey && !member.tabId)) {
+            return member;
+          }
+          changed = true;
+          return {
+            ...member,
+            isOpen: false,
+            sourceTabKey: null,
+            tabId: null,
+          };
+        }
+
+        const nextMember = this.makeMemberFromTab(liveTab, member.id);
+        const normalizedMember = {
+          ...member,
+          ...nextMember,
+          id: member.id,
+        };
+        if (JSON.stringify(normalizedMember) !== JSON.stringify(member)) {
+          changed = true;
+        }
+        return normalizedMember;
+      }),
+    }));
+
+    if (changed) {
+      this.emit();
+    }
+  }
+
+  public createGroupFromTab(tab: TrackedTab, name?: string): VirtualGroup {
+    const member = this.makeMemberFromTab(tab);
+
+    const group: VirtualGroup = {
+      id: this.makeID("group"),
+      name: name?.trim() || this.buildDefaultGroupName(tab),
+      color: this.pickNextColor(),
+      collapsed: false,
+      sortMode: "manual",
+      members: [member],
+    };
+
+    this.groups = [...this.groups, group];
+    this.emit();
+    return { ...group, members: group.members.map((item) => ({ ...item })) };
+  }
+
+  public addTabToGroup(groupId: string, tab: TrackedTab): void {
+    const member = this.makeMemberFromTab(tab);
+
+    let changed = false;
+    this.groups = this.groups.map((group) => {
+      if (group.id !== groupId) {
+        return group;
+      }
+
+      const existingIndex = group.members.findIndex((item) => item.key === member.key);
+      changed = true;
+      if (existingIndex >= 0) {
+        const members = [...group.members];
+        members[existingIndex] = {
+          ...members[existingIndex],
+          ...member,
+          id: members[existingIndex].id,
+        };
+        return {
+          ...group,
+          members,
+        };
+      }
+
+      return {
+        ...group,
+        members: [...group.members, member],
+      };
+    });
+
+    if (changed) {
+      this.emit();
+    }
+  }
+
+  public removeMember(groupId: string, memberKey: string): void {
+    let changed = false;
+    this.groups = this.groups
+      .map((group) => {
+        if (group.id !== groupId) {
+          return group;
+        }
+
+        const members = group.members.filter((member) => member.key !== memberKey);
+        if (members.length === group.members.length) {
+          return group;
+        }
+        changed = true;
+        return {
+          ...group,
+          members,
+        };
+      })
+      .filter((group) => group.members.length > 0);
+
+    if (changed) {
+      this.emit();
+    }
+  }
+
+  public dissolveGroup(groupId: string): void {
+    const nextGroups = this.groups.filter((group) => group.id !== groupId);
+    if (nextGroups.length === this.groups.length) {
+      return;
+    }
+    this.groups = nextGroups;
+    this.emit();
+  }
+
+  public renameGroup(groupId: string, name: string): void {
+    const normalizedName = name.trim();
+    if (!normalizedName) {
+      return;
+    }
+
+    let changed = false;
+    this.groups = this.groups.map((group) => {
+      if (group.id !== groupId || group.name === normalizedName) {
+        return group;
+      }
+      changed = true;
+      return {
+        ...group,
+        name: normalizedName,
+      };
+    });
+
+    if (changed) {
+      this.emit();
+    }
+  }
+
+  public toggleCollapsed(groupId: string): void {
+    let changed = false;
+    this.groups = this.groups.map((group) => {
+      if (group.id !== groupId) {
+        return group;
+      }
+      changed = true;
+      return {
+        ...group,
+        collapsed: !group.collapsed,
+      };
+    });
+
+    if (changed) {
+      this.emit();
+    }
+  }
+
+  public setColor(groupId: string, color: string): void {
+    let changed = false;
+    this.groups = this.groups.map((group) => {
+      if (group.id !== groupId || group.color === color) {
+        return group;
+      }
+      changed = true;
+      return {
+        ...group,
+        color,
+      };
+    });
+
+    if (changed) {
+      this.emit();
+    }
+  }
+
+  public findGroupById(groupId: string): VirtualGroup | null {
+    return this.getGroups().find((group) => group.id === groupId) ?? null;
+  }
+
+  public getUngroupedTabs(tabs: TrackedTab[]): TrackedTab[] {
+    return [...tabs];
+  }
+
+  public makeMemberKeyFromTab(tab: TrackedTab): string {
+    return makeVirtualMemberKey({
+      itemID: tab.itemID,
+      parentItemID: tab.parentItemID,
+      tabId: tab.tabId,
+      type: tab.type,
+      title: tab.title,
+    });
+  }
+
+  private buildDefaultGroupName(tab: TrackedTab): string {
+    if (tab.parentItemID != null) {
+      return `Group ${tab.parentItemID}`;
+    }
+    if (tab.itemID != null) {
+      return `Group ${tab.itemID}`;
+    }
+    return tab.title.slice(0, 32) || "New Group";
+  }
+
+  private makeMemberFromTab(
+    tab: TrackedTab,
+    id = this.makeID("member"),
+  ): VirtualGroupMember {
+    return {
+      id,
+      key: this.makeMemberKeyFromTab(tab),
+      sourceTabKey: tab.key,
+      tabId: tab.tabId,
+      type: tab.type,
+      title: tab.title,
+      itemID: tab.itemID,
+      parentItemID: tab.parentItemID,
+      isOpen: tab.isOpen,
+      openedAt: tab.openedAt,
+      iconKey: tab.iconKey,
+    };
+  }
+
+  private pickNextColor(): string {
+    return GROUP_COLOR_PALETTE[this.groups.length % GROUP_COLOR_PALETTE.length];
+  }
+
+  private makeID(prefix: string): string {
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private emit(): void {
+    const snapshot = this.getGroups();
+    this.listeners.forEach((listener) => {
+      try {
+        listener(snapshot);
+      } catch (error) {
+        ztoolkit.log("TabGroupStore listener failed", error);
+      }
+    });
+  }
+}

@@ -107,10 +107,16 @@ export default class TabEnhance {
     const items = this.commandController.getContextMenuItems(tabInfo.tabId);
 
     items.forEach((item) => {
-      if (item.id === MENU_ITEM_IDS.COPY_REFERENCE && !getPref("enableCopyReference")) {
+      if (
+        item.id === MENU_ITEM_IDS.COPY_REFERENCE &&
+        !getPref("enableCopyReference")
+      ) {
         return;
       }
-      if (item.id === MENU_ITEM_IDS.SHOW_IN_FILESYSTEM && !getPref("enableGoToAttachment")) {
+      if (
+        item.id === MENU_ITEM_IDS.SHOW_IN_FILESYSTEM &&
+        !getPref("enableGoToAttachment")
+      ) {
         return;
       }
       if (item.id === MENU_ITEM_IDS.RELOAD && !getPref("enableReloadTab")) {
