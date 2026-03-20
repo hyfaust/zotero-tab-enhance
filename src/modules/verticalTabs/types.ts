@@ -20,13 +20,27 @@ export interface SidebarState {
   selectedKeys: string[];
 }
 
+export interface VirtualGroupMember {
+  id: string;
+  key: string;
+  sourceTabKey: string | null;
+  tabId: string | null;
+  type: string;
+  title: string;
+  itemID: number | null;
+  parentItemID: number | null;
+  isOpen: boolean;
+  openedAt: number | null;
+  iconKey: string;
+}
+
 export interface VirtualGroup {
   id: string;
   name: string;
   color: string;
   collapsed: boolean;
-  memberKeys: string[];
   sortMode: "manual" | "recent" | "type";
+  members: VirtualGroupMember[];
 }
 
 export interface TabTrackerSnapshot {
@@ -35,3 +49,35 @@ export interface TabTrackerSnapshot {
 }
 
 export const LIBRARY_TAB_ID = "zotero-pane";
+
+export const GROUP_COLOR_PALETTE = [
+  "#F6B433",
+  "#E36D6D",
+  "#5C8DF6",
+  "#4FB286",
+  "#9A6AF0",
+  "#E28A3B",
+] as const;
+
+export function makeVirtualMemberKey(input: {
+  itemID?: number | null;
+  parentItemID?: number | null;
+  tabId?: string | null;
+  type?: string | null;
+  title?: string | null;
+}): string {
+  if (typeof input.itemID === "number") {
+    return `item:${input.itemID}`;
+  }
+
+  if (typeof input.parentItemID === "number") {
+    return `parent:${input.parentItemID}:${input.type ?? "tab"}`;
+  }
+
+  if (input.tabId) {
+    return `tab:${input.tabId}`;
+  }
+
+  const fallbackTitle = input.title?.trim() || "unknown";
+  return `fallback:${input.type ?? "tab"}:${fallbackTitle}`;
+}
