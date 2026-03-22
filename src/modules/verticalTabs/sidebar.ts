@@ -59,6 +59,8 @@ export default class VerticalTabSidebar {
   private listContainer?: HTMLElement;
   private searchInput?: HTMLInputElement;
   private contextMenu?: XULPopupElement;
+  private groupNamePanel?: XULPopupElement;
+  private groupNameInput?: HTMLInputElement;
   private stylesheet?: HTMLElement;
   private unsubscribeTracker?: () => void;
   private unsubscribeGroupStore?: () => void;
@@ -74,6 +76,9 @@ export default class VerticalTabSidebar {
   private dragOverHeaderGroupId: string | null = null;
   private dragOverPosition: DropPosition | null = null;
   private pendingGroupToggleTimers = new Map<string, number>();
+  private lastContextMenuPoint = { x: 0, y: 0 };
+  private pendingGroupNameSubmit?: ((name: string) => void) | null;
+  private groupNamePanelConfirmed = false;
 
   private readonly handleResizeEnd = () => {
     if (!this.sidebar || this.collapsed) {
@@ -256,6 +261,7 @@ export default class VerticalTabSidebar {
     this.sidebar?.remove();
     this.splitter?.remove();
     this.contextMenu?.remove();
+    this.groupNamePanel?.remove();
     this.stylesheet?.remove();
     this.sidebar = undefined;
     this.splitter = undefined;
@@ -267,6 +273,8 @@ export default class VerticalTabSidebar {
     this.listContainer = undefined;
     this.searchInput = undefined;
     this.contextMenu = undefined;
+    this.groupNamePanel = undefined;
+    this.groupNameInput = undefined;
     this.stylesheet = undefined;
     this.trackedTabsByKey.clear();
     this.trackedTabsByMemberKey.clear();
@@ -435,6 +443,57 @@ export default class VerticalTabSidebar {
       },
     }) as unknown as XULPopupElement;
 
+    const groupNamePanel = ztoolkit.createXULElement(this.document, "panel") as unknown as XULPopupElement;
+    groupNamePanel.setAttribute("id", `${config.addonRef}-group-name-panel`);
+    groupNamePanel.setAttribute("class", "tab-enhance-group-name-popup");
+    groupNamePanel.setAttribute("type", "arrow");
+    groupNamePanel.setAttribute("flip", "both");
+    groupNamePanel.setAttribute("consumeoutsideclicks", "true");
+    groupNamePanel.setAttribute("noautofocus", "false");
+    const groupNamePanelBody = ztoolkit.UI.createElement(this.document, "div", {
+      namespace: "html",
+      classList: ["tab-enhance-group-name-panel"],
+    }) as HTMLDivElement;
+    const groupNameInput = ztoolkit.UI.createElement(this.document, "input", {
+      namespace: "html",
+      classList: ["tab-enhance-group-name-input"],
+      attributes: {
+        type: "text",
+        placeholder: getString("group-name-prompt"),
+      },
+      listeners: [
+        {
+          type: "keydown",
+          listener: (event: Event) => {
+            const keyboardEvent = event as KeyboardEvent;
+            if (keyboardEvent.key === "Enter") {
+              keyboardEvent.preventDefault();
+              keyboardEvent.stopPropagation();
+              this.confirmGroupNamePanel();
+              return;
+            }
+            if (keyboardEvent.key === "Escape") {
+              keyboardEvent.preventDefault();
+              keyboardEvent.stopPropagation();
+              this.cancelGroupNamePanel();
+            }
+          },
+        },
+      ],
+    }) as HTMLInputElement;
+    groupNamePanel.addEventListener("popupshown", () => {
+      this.groupNameInput?.focus();
+      this.groupNameInput?.select();
+    });
+    groupNamePanel.addEventListener("popuphidden", () => {
+      if (!this.groupNamePanelConfirmed) {
+        this.pendingGroupNameSubmit = null;
+      }
+      this.groupNamePanelConfirmed = false;
+    });
+    groupNamePanelBody.appendChild(groupNameInput);
+    groupNamePanel.appendChild(groupNamePanelBody);
+
     header.appendChild(toggleButton);
     header.appendChild(headerText);
     header.appendChild(countBadge);
@@ -448,6 +507,7 @@ export default class VerticalTabSidebar {
       this.document.getElementById("mainPopupSet") ??
       this.document.documentElement;
     popupHost?.appendChild(contextMenu);
+    popupHost?.appendChild(groupNamePanel);
 
     const splitter = ztoolkit.UI.createElement(this.document, "splitter", {
       classList: ["tab-enhance-vertical-tabs-splitter"],
@@ -469,6 +529,8 @@ export default class VerticalTabSidebar {
     this.searchInput = searchInput;
     this.listContainer = listContainer;
     this.contextMenu = contextMenu;
+    this.groupNamePanel = groupNamePanel;
+    this.groupNameInput = groupNameInput;
     this.applySidebarWidth();
     return true;
   }
@@ -747,7 +809,6 @@ export default class VerticalTabSidebar {
         tab,
       );
     });
-
     this.hideContextMenu();
     this.updateViewSwitcher();
     this.headerTitle.textContent = this.getViewTitle();
@@ -1698,7 +1759,7 @@ export default class VerticalTabSidebar {
     const groupId = row.dataset.groupId ?? null;
     const memberKey = row.dataset.memberKey ?? null;
     if (groupId && memberKey) {
-      this.hideContextMenu();
+    this.hideContextMenu();
       this.draggedTabKey = null;
       this.draggedGroupId = groupId;
       this.draggedMemberKey = memberKey;
@@ -1722,7 +1783,6 @@ export default class VerticalTabSidebar {
       event.preventDefault();
       return;
     }
-
     this.hideContextMenu();
     this.draggedTabKey = tabKey;
     this.draggedGroupId = null;
@@ -1848,7 +1908,6 @@ export default class VerticalTabSidebar {
       event.preventDefault();
       return;
     }
-
     this.hideContextMenu();
     this.draggedTabKey = null;
     this.draggedGroupId = null;
@@ -1952,6 +2011,43 @@ export default class VerticalTabSidebar {
     this.groupStore.createGroupFromTab(this.normalizeTab(selectedTab), name);
   }
 
+
+  private openGroupNamePanel(
+    defaultValue: string,
+    onSubmit: (name: string) => void,
+    screenX = this.lastContextMenuPoint.x,
+    screenY = this.lastContextMenuPoint.y,
+  ): void {
+    if (!this.groupNamePanel || !this.groupNameInput) {
+      const fallbackValue = this.promptForGroupName(defaultValue);
+      if (fallbackValue !== null) {
+        onSubmit(fallbackValue);
+      }
+      return;
+    }
+
+    this.groupNamePanelConfirmed = false;
+    this.pendingGroupNameSubmit = onSubmit;
+    this.groupNameInput.value = defaultValue;
+    this.groupNamePanel.openPopupAtScreen(screenX + 8, screenY + 8, true);
+  }
+
+  private confirmGroupNamePanel(): void {
+    const submit = this.pendingGroupNameSubmit;
+    const value = this.groupNameInput?.value.trim() || getString("new-group");
+    this.pendingGroupNameSubmit = null;
+    this.groupNamePanelConfirmed = true;
+    this.groupNamePanel?.hidePopup();
+    if (submit) {
+      submit(value);
+    }
+  }
+
+  private cancelGroupNamePanel(): void {
+    this.pendingGroupNameSubmit = null;
+    this.groupNamePanelConfirmed = false;
+    this.groupNamePanel?.hidePopup();
+  }
   private async activateGroupMember(
     groupId: string,
     memberKey: string,
@@ -2066,7 +2162,7 @@ export default class VerticalTabSidebar {
     if (!this.contextMenu) {
       return;
     }
-
+    this.lastContextMenuPoint = { x: screenX, y: screenY };
     this.hideContextMenu();
 
     switch (target.kind) {
@@ -2102,11 +2198,9 @@ export default class VerticalTabSidebar {
 
     this.appendSeparator();
     this.appendMenuItem(getString("create-group"), () => {
-      const name = this.promptForGroupName(tracked.title);
-      if (name === null) {
-        return;
-      }
-      this.groupStore.createGroupFromTab(tracked, name);
+      this.openGroupNamePanel(tracked.title, (name) => {
+        this.groupStore.createGroupFromTab(tracked, name);
+      });
     });
 
     const groups = this.groupStore.getGroups();
@@ -2166,11 +2260,9 @@ export default class VerticalTabSidebar {
       () => this.groupStore.toggleCollapsed(group.id),
     );
     this.appendMenuItem(getString("rename-group"), () => {
-      const nextName = this.promptForGroupName(group.name);
-      if (nextName === null) {
-        return;
-      }
-      this.groupStore.renameGroup(group.id, nextName);
+      this.openGroupNamePanel(group.name, (nextName) => {
+        this.groupStore.renameGroup(group.id, nextName);
+      });
     });
     this.appendColorSubmenu(group.id, group.color);
     this.appendSeparator();
@@ -2183,7 +2275,7 @@ export default class VerticalTabSidebar {
     return this.createMenuItem(
       item.label,
       async () => {
-        this.hideContextMenu();
+    this.hideContextMenu();
         if (item.disabled) {
           return;
         }
@@ -2275,7 +2367,7 @@ export default class VerticalTabSidebar {
     const menuItem = ztoolkit.createXULElement(this.document, "menuitem");
     menuItem.setAttribute("label", label);
     menuItem.addEventListener("command", async () => {
-      this.hideContextMenu();
+    this.hideContextMenu();
       if (disabled) {
         return;
       }
