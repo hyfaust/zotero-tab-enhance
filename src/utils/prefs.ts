@@ -1,16 +1,49 @@
 import { config } from "../../package.json";
+import { GROUP_COLOR_PALETTE } from "../modules/verticalTabs/types";
 
 type PluginPrefsMap = _ZoteroTypes.Prefs["PluginPrefsMap"];
 type PrefValue = string | number | boolean;
 
 const PREFS_PREFIX = config.prefsPrefix;
+export const GROUP_COLOR_PREF_KEYS = [
+  "groupColor1",
+  "groupColor2",
+  "groupColor3",
+  "groupColor4",
+  "groupColor5",
+  "groupColor6",
+] as const;
 const DEFAULT_PREF_VALUES: PluginPrefsMap = {
   enableVerticalTabs: true,
   enableHorizontalTabEnhance: true,
   enableCopyReference: true,
   enableGoToAttachment: true,
   enableReloadTab: true,
+  verticalTabTitleMode: "title",
+  verticalTabSubtitleMode: "source",
+  groupColor1: GROUP_COLOR_PALETTE[0],
+  groupColor2: GROUP_COLOR_PALETTE[1],
+  groupColor3: GROUP_COLOR_PALETTE[2],
+  groupColor4: GROUP_COLOR_PALETTE[3],
+  groupColor5: GROUP_COLOR_PALETTE[4],
+  groupColor6: GROUP_COLOR_PALETTE[5],
 };
+
+function normalizeHexColor(
+  value: PluginPrefsMap[keyof PluginPrefsMap],
+  fallback: string,
+): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(trimmed)) {
+    return fallback;
+  }
+
+  return trimmed.toUpperCase();
+}
 
 /**
  * Get preference value.
@@ -73,6 +106,12 @@ export function getJSONPref<T>(key: string, fallbackValue: T): T {
 
 export function setJSONPref(key: string, value: unknown) {
   return setRawPref(key, JSON.stringify(value));
+}
+
+export function getGroupColorPalette(): string[] {
+  return GROUP_COLOR_PREF_KEYS.map((key, index) =>
+    normalizeHexColor(getPref(key), GROUP_COLOR_PALETTE[index]),
+  );
 }
 
 /**
