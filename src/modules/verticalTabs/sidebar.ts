@@ -4,6 +4,7 @@ import { getGroupColorPalette, getJSONPref, getPref, setJSONPref } from "../../u
 import TabTrackerService from "./tabTracker";
 import TabCommandController, { TabCommandItem } from "./tabCommands";
 import TabGroupStore from "./groupStore";
+import { setCollapsibleMeasuredHeight, syncCollapsibleState } from "./collapsible";
 import {
   LIBRARY_TAB_ID,
   SidebarState,
@@ -1189,10 +1190,11 @@ export default class VerticalTabSidebar {
         "aria-hidden": renderable.group.collapsed ? "true" : "false",
       },
     }) as HTMLDivElement;
-    members.style.setProperty(
-      "--group-members-max-height",
+    setCollapsibleMeasuredHeight(
+      members,
       `${Math.max(72, renderable.members.length * 72)}px`,
     );
+    this.applyGroupMembersVisibility(members, renderable.group.collapsed);
 
     renderable.members.forEach((member) => {
       if (
@@ -1247,6 +1249,7 @@ export default class VerticalTabSidebar {
     }
     if (members) {
       members.setAttribute("aria-hidden", nextCollapsed ? "true" : "false");
+      this.applyGroupMembersVisibility(members, nextCollapsed);
     }
 
     container.classList.add("is-transitioning");
@@ -1260,6 +1263,13 @@ export default class VerticalTabSidebar {
     this.pendingGroupToggleTimers.set(groupId, timerId);
   }
 
+
+  private applyGroupMembersVisibility(
+    members: HTMLDivElement,
+    collapsed: boolean,
+  ): void {
+    syncCollapsibleState(members, collapsed);
+  }
   private getRenderableGroups(openTabs: TrackedTab[]): RenderableGroup[] {
     const groups = this.groupStore.getGroups();
     const openTabMap = new Map(
