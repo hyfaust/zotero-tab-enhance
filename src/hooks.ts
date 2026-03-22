@@ -186,7 +186,7 @@ async function onNotify(
   if (type === "tab") {
     addon.tabTrackerInstances.forEach((tabTracker) => {
       const reason = `${event}:${ids.join(",")}`;
-      tabTracker.reconcile(reason);
+      tabTracker.requestReconcile(reason);
       if (event === "add" || event === "load") {
         tabTracker.scheduleDelayedReconcile(reason);
       }
@@ -256,4 +256,3 @@ export default {
   onShortcuts,
   onDialogEvents,
 };
-
