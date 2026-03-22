@@ -17,7 +17,7 @@
   border-right: 1px solid color-mix(in srgb, currentColor 10%, transparent);
   color: var(--material-text-primary, #222);
   overflow: hidden;
-  transition: width 100ms ease-out;
+  transition: width 250ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .tab-enhance-vertical-tabs-sidebar.is-collapsed {
@@ -68,7 +68,7 @@
   font-size: 16px;
   line-height: 1;
   overflow: hidden;
-  transition: opacity 180ms ease-out, transform 180ms ease-out, max-height 180ms ease-out, margin 180ms ease-out, padding 180ms ease-out, border-width 180ms ease-out;
+  transition: opacity 250ms cubic-bezier(0.2, 0, 0, 1), transform 250ms cubic-bezier(0.2, 0, 0, 1), max-height 250ms cubic-bezier(0.2, 0, 0, 1), margin 250ms cubic-bezier(0.2, 0, 0, 1), padding 250ms cubic-bezier(0.2, 0, 0, 1), border-width 250ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .tab-enhance-vertical-tabs-create-group:hover {
@@ -86,7 +86,7 @@
   outline: none;
   box-sizing: border-box;
   max-height: 40px;
-  transition: opacity 180ms ease-out, transform 180ms ease-out, max-height 180ms ease-out, margin 180ms ease-out, padding 180ms ease-out, border-width 180ms ease-out;
+  transition: opacity 250ms cubic-bezier(0.2, 0, 0, 1), transform 250ms cubic-bezier(0.2, 0, 0, 1), max-height 250ms cubic-bezier(0.2, 0, 0, 1), margin 250ms cubic-bezier(0.2, 0, 0, 1), padding 250ms cubic-bezier(0.2, 0, 0, 1), border-width 250ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .tab-enhance-vertical-tabs-search:focus {
@@ -100,7 +100,7 @@
   padding: 0 8px 6px;
   overflow: hidden;
   max-height: 40px;
-  transition: opacity 180ms ease-out, transform 180ms ease-out, width 180ms ease-out, margin 180ms ease-out;
+  transition: opacity 250ms cubic-bezier(0.2, 0, 0, 1), transform 250ms cubic-bezier(0.2, 0, 0, 1), width 250ms cubic-bezier(0.2, 0, 0, 1), margin 250ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .tab-enhance-vertical-tabs-view-button {
@@ -188,6 +188,7 @@
   color: inherit;
   cursor: pointer;
   user-select: none;
+  transition: width 250ms cubic-bezier(0.2, 0, 0, 1), max-width 250ms cubic-bezier(0.2, 0, 0, 1), padding 250ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .tab-enhance-vertical-group-header:hover {
@@ -242,6 +243,7 @@
   gap: 5px;
   padding-left: 28px;
   margin-left: 0;
+  transition: padding-left 250ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .tab-enhance-vertical-aggregate-section {
@@ -294,6 +296,7 @@
   text-align: left;
   cursor: pointer;
   user-select: none;
+  transition: width 250ms cubic-bezier(0.2, 0, 0, 1), padding 250ms cubic-bezier(0.2, 0, 0, 1), gap 250ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .tab-enhance-vertical-tab-row:hover {
@@ -340,7 +343,8 @@
   opacity: 0.48;
 }
 
-.tab-enhance-vertical-tabs-list > .tab-enhance-vertical-tab-placeholder {
+.tab-enhance-vertical-tabs-list > .tab-enhance-vertical-tab-placeholder,
+.tab-enhance-vertical-group-members > .tab-enhance-vertical-tab-placeholder {
   position: relative;
   display: block;
   width: 100%;
@@ -349,7 +353,8 @@
   pointer-events: none;
 }
 
-.tab-enhance-vertical-tabs-list > .tab-enhance-vertical-tab-placeholder::before {
+.tab-enhance-vertical-tabs-list > .tab-enhance-vertical-tab-placeholder::before,
+.tab-enhance-vertical-group-members > .tab-enhance-vertical-tab-placeholder::before {
   content: "";
   position: absolute;
   left: 8px;
@@ -565,7 +570,7 @@
 .tab-enhance-vertical-tab-close,
 .tab-enhance-vertical-tabs-title,
 .tab-enhance-vertical-tabs-count {
-  transition: opacity 180ms ease-out, transform 180ms ease-out;
+  transition: opacity 250ms cubic-bezier(0.2, 0, 0, 1), transform 250ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-group-chevron,
