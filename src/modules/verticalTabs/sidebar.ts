@@ -80,6 +80,8 @@ export default class VerticalTabSidebar {
   private lastContextMenuPoint = { x: 0, y: 0 };
   private pendingGroupNameSubmit?: ((name: string) => void) | null;
   private groupNamePanelConfirmed = false;
+  private readonly displayItemCache = new Map<string, any | null>();
+  private readonly itemFieldCache = new Map<string, string>();
 
   private readonly handleResizeEnd = () => {
     if (!this.sidebar || this.collapsed) {
@@ -223,10 +225,12 @@ export default class VerticalTabSidebar {
       }
     });
     this.unsubscribeTracker = this.tracker.subscribe((snapshot) => {
-      this.groupStore.syncTrackedTabs(
+      const groupSyncChanged = this.groupStore.syncTrackedTabs(
         snapshot.tabs.map((tab) => this.normalizeTab(tab)),
       );
-      this.render(snapshot);
+      if (!groupSyncChanged) {
+        this.render(snapshot);
+      }
     });
     this.window.addEventListener("mouseup", this.handleResizeEnd);
     this.window.addEventListener("dragend", this.handleWindowDragEnd, true);
@@ -237,6 +241,7 @@ export default class VerticalTabSidebar {
     if (!this.initialized) {
       return;
     }
+    this.clearDisplayMetadataCache();
     this.render(this.tracker.getSnapshot());
   }
 
@@ -279,6 +284,7 @@ export default class VerticalTabSidebar {
     this.stylesheet = undefined;
     this.trackedTabsByKey.clear();
     this.trackedTabsByMemberKey.clear();
+    this.clearDisplayMetadataCache();
     this.groupStore.destroy();
     this.clearDragState();
     this.initialized = false;
@@ -2951,12 +2957,18 @@ export default class VerticalTabSidebar {
       (value, index, array): value is number =>
         typeof value === "number" && array.indexOf(value) === index,
     );
+    const cacheKey = ids.length ? ids.join("|") : "none";
+    if (this.displayItemCache.has(cacheKey)) {
+      return this.displayItemCache.get(cacheKey) ?? null;
+    }
     for (const id of ids) {
       const item = Zotero.Items.get(id);
       if (item) {
+        this.displayItemCache.set(cacheKey, item);
         return item;
       }
     }
+    this.displayItemCache.set(cacheKey, null);
     return null;
   }
 
@@ -2965,14 +2977,27 @@ export default class VerticalTabSidebar {
       return "";
     }
     for (const field of fields) {
+      const cacheKey =
+        typeof item.id === "number" ? `${item.id}:${field}` : `unknown:${field}`;
+      if (this.itemFieldCache.has(cacheKey)) {
+        const cachedValue = this.itemFieldCache.get(cacheKey);
+        if (cachedValue) {
+          return cachedValue;
+        }
+        continue;
+      }
       try {
         const value = item.getField(field);
         if (typeof value === "string" && value.trim()) {
-          return value.trim();
+          const normalizedValue = value.trim();
+          this.itemFieldCache.set(cacheKey, normalizedValue);
+          return normalizedValue;
         }
       } catch {
+        this.itemFieldCache.set(cacheKey, "");
         continue;
       }
+      this.itemFieldCache.set(cacheKey, "");
     }
     return "";
   }
@@ -2998,5 +3023,10 @@ export default class VerticalTabSidebar {
       return `${creator} · ${year}`;
     }
     return creator || year;
+  }
+
+  private clearDisplayMetadataCache(): void {
+    this.displayItemCache.clear();
+    this.itemFieldCache.clear();
   }
 }

@@ -1,8 +1,4 @@
-import {
-  LIBRARY_TAB_ID,
-  TabTrackerSnapshot,
-  TrackedTab,
-} from "./types";
+import { LIBRARY_TAB_ID, TabTrackerSnapshot, TrackedTab } from "./types";
 
 type SnapshotListener = (snapshot: TabTrackerSnapshot) => void;
 
@@ -30,6 +26,8 @@ export default class TabTrackerService {
   };
   private openedAtByTabId = new Map<string, number>();
   private listeners = new Set<SnapshotListener>();
+  private pendingReconcileReason: string | null = null;
+  private queuedReconcileTimer: number | null = null;
   private delayedReconcileTimers = new Set<number>();
 
   constructor(window: _ZoteroTypes.MainWindow) {
@@ -55,7 +53,14 @@ export default class TabTrackerService {
     this.initialized = false;
     this.snapshot = { tabs: [], selectedTabKey: null };
     this.openedAtByTabId.clear();
-    this.delayedReconcileTimers.forEach((timerId) => this.window.clearTimeout(timerId));
+    if (this.queuedReconcileTimer != null) {
+      this.window.clearTimeout(this.queuedReconcileTimer);
+      this.queuedReconcileTimer = null;
+    }
+    this.pendingReconcileReason = null;
+    this.delayedReconcileTimers.forEach((timerId) =>
+      this.window.clearTimeout(timerId),
+    );
     this.delayedReconcileTimers.clear();
     this.listeners.clear();
     ztoolkit.log("TabTrackerService destroyed");
@@ -74,7 +79,9 @@ export default class TabTrackerService {
     const selectedID = this.window.Zotero_Tabs.selectedID ?? null;
     const visibleTabs = runtimeTabs.filter((tab) => this.shouldTrackTab(tab));
     const activeTabIDs = new Set(
-      visibleTabs.map((tab) => tab.id).filter((tabId): tabId is string => Boolean(tabId)),
+      visibleTabs
+        .map((tab) => tab.id)
+        .filter((tabId): tabId is string => Boolean(tabId)),
     );
 
     for (const tab of visibleTabs) {
@@ -118,6 +125,27 @@ export default class TabTrackerService {
     return this.getSnapshot();
   }
 
+  public requestReconcile(reason = "unknown", delay = 16): void {
+    if (!this.initialized) {
+      return;
+    }
+
+    this.pendingReconcileReason = reason;
+    if (this.queuedReconcileTimer != null) {
+      return;
+    }
+
+    this.queuedReconcileTimer = this.window.setTimeout(() => {
+      this.queuedReconcileTimer = null;
+      const nextReason = this.pendingReconcileReason ?? reason;
+      this.pendingReconcileReason = null;
+      if (!this.initialized) {
+        return;
+      }
+      this.reconcile(`queued:${nextReason}`);
+    }, delay);
+  }
+
   public getSnapshot(): TabTrackerSnapshot {
     return {
       tabs: [...this.snapshot.tabs],
@@ -131,8 +159,9 @@ export default class TabTrackerService {
 
   public getSelectedTab(): TrackedTab | null {
     return (
-      this.snapshot.tabs.find((tab) => tab.key === this.snapshot.selectedTabKey) ??
-      null
+      this.snapshot.tabs.find(
+        (tab) => tab.key === this.snapshot.selectedTabKey,
+      ) ?? null
     );
   }
 
@@ -140,6 +169,10 @@ export default class TabTrackerService {
     reason: string,
     delays: number[] = [60, 180, 420],
   ): void {
+    this.delayedReconcileTimers.forEach((timerId) =>
+      this.window.clearTimeout(timerId),
+    );
+    this.delayedReconcileTimers.clear();
     delays.forEach((delay) => {
       const timerId = this.window.setTimeout(() => {
         this.delayedReconcileTimers.delete(timerId);
@@ -229,7 +262,10 @@ export default class TabTrackerService {
     return tabId;
   }
 
-  private normalizeTitle(title: string | undefined, tabId: string): string | null {
+  private normalizeTitle(
+    title: string | undefined,
+    tabId: string,
+  ): string | null {
     if (typeof title !== "string") {
       return null;
     }

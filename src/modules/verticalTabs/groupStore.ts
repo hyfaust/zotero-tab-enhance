@@ -39,7 +39,7 @@ export default class TabGroupStore {
     this.emit();
   }
 
-  public syncTrackedTabs(tabs: TrackedTab[]): void {
+  public syncTrackedTabs(tabs: TrackedTab[]): boolean {
     const openTabsByMemberKey = new Map(
       tabs.map((tab) => [this.makeMemberKeyFromTab(tab), tab] as const),
     );
@@ -78,6 +78,7 @@ export default class TabGroupStore {
     if (changed) {
       this.emit();
     }
+    return changed;
   }
 
   public createGroupFromTab(tab: TrackedTab, name?: string): VirtualGroup {
