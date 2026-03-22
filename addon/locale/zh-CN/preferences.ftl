@@ -13,11 +13,11 @@ pref-enable-go-to-attachment =
 pref-enable-reload-tab =
     .label = 启用右键重新加载标签页
 
-pref-tab-display = 侧边栏标签内容自定义
-pref-vertical-tab-title-mode = 标签主标题
+pref-tab-display = 侧边栏标签页自定义
+pref-vertical-tab-title-mode = 标签页主标题
 pref-vertical-tab-title-mode-title = 标题
 pref-vertical-tab-title-mode-short-title = 短标题
-pref-vertical-tab-subtitle-mode = 标签副标题
+pref-vertical-tab-subtitle-mode = 标签页副标题
 pref-vertical-tab-subtitle-mode-source = 来源（期刊/会议/书籍等）
 pref-vertical-tab-subtitle-mode-creator-year = 作者与年份
 pref-vertical-tab-subtitle-mode-type-and-item = 类型与条目编号
