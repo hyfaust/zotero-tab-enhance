@@ -166,6 +166,106 @@ export default class TabGroupStore {
     }
   }
 
+
+  public reorderMember(
+    groupId: string,
+    sourceMemberKey: string,
+    targetMemberKey: string,
+    position: "before" | "after",
+  ): void {
+    if (!groupId || !sourceMemberKey || !targetMemberKey) {
+      return;
+    }
+
+    let changed = false;
+    this.groups = this.groups.map((group) => {
+      if (group.id !== groupId) {
+        return group;
+      }
+
+      const sourceIndex = group.members.findIndex(
+        (member) => member.key === sourceMemberKey,
+      );
+      const targetIndex = group.members.findIndex(
+        (member) => member.key === targetMemberKey,
+      );
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+        return group;
+      }
+
+      const members = [...group.members];
+      const [sourceMember] = members.splice(sourceIndex, 1);
+      let insertIndex = targetIndex;
+      if (sourceIndex < targetIndex) {
+        insertIndex -= 1;
+      }
+      if (position === "after") {
+        insertIndex += 1;
+      }
+      insertIndex = Math.max(0, Math.min(insertIndex, members.length));
+
+      if (members[insertIndex]?.key === sourceMember.key) {
+        return group;
+      }
+
+      members.splice(insertIndex, 0, sourceMember);
+      if (
+        members.every((member, index) => member.id === group.members[index]?.id)
+      ) {
+        return group;
+      }
+
+      changed = true;
+      return {
+        ...group,
+        members,
+      };
+    });
+
+    if (changed) {
+      this.emit();
+    }
+  }
+
+  public reorderGroup(
+    sourceGroupId: string,
+    targetGroupId: string,
+    position: "before" | "after",
+  ): void {
+    if (!sourceGroupId || !targetGroupId || sourceGroupId === targetGroupId) {
+      return;
+    }
+
+    const sourceIndex = this.groups.findIndex(
+      (group) => group.id === sourceGroupId,
+    );
+    const targetIndex = this.groups.findIndex(
+      (group) => group.id === targetGroupId,
+    );
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+      return;
+    }
+
+    const groups = [...this.groups];
+    const [sourceGroup] = groups.splice(sourceIndex, 1);
+    let insertIndex = targetIndex;
+    if (sourceIndex < targetIndex) {
+      insertIndex -= 1;
+    }
+    if (position === "after") {
+      insertIndex += 1;
+    }
+    insertIndex = Math.max(0, Math.min(insertIndex, groups.length));
+    groups.splice(insertIndex, 0, sourceGroup);
+
+    if (groups.every((group, index) => group.id === this.groups[index]?.id)) {
+      return;
+    }
+
+    this.groups = groups;
+    this.emit();
+  }
+
   public dissolveGroup(groupId: string): void {
     const nextGroups = this.groups.filter((group) => group.id !== groupId);
     if (nextGroups.length === this.groups.length) {
