@@ -12,3 +12,21 @@ pref-enable-go-to-attachment =
     .label = 启用右键跳转到附件
 pref-enable-reload-tab =
     .label = 启用右键重新加载标签页
+
+pref-tab-display = 侧边栏标签内容自定义
+pref-vertical-tab-title-mode = 标签主标题
+pref-vertical-tab-title-mode-title = 标题
+pref-vertical-tab-title-mode-short-title = 短标题
+pref-vertical-tab-subtitle-mode = 标签副标题
+pref-vertical-tab-subtitle-mode-source = 来源（期刊/会议/书籍等）
+pref-vertical-tab-subtitle-mode-creator-year = 作者与年份
+pref-vertical-tab-subtitle-mode-type-and-item = 类型与条目编号
+pref-vertical-tab-subtitle-mode-none = 不显示
+
+pref-group-colors = 分组基础颜色
+pref-group-color-1 = 颜色 1
+pref-group-color-2 = 颜色 2
+pref-group-color-3 = 颜色 3
+pref-group-color-4 = 颜色 4
+pref-group-color-5 = 颜色 5
+pref-group-color-6 = 颜色 6

@@ -12,6 +12,14 @@ declare namespace _ZoteroTypes {
       "enableCopyReference": boolean;
       "enableGoToAttachment": boolean;
       "enableReloadTab": boolean;
+      "verticalTabTitleMode": string;
+      "verticalTabSubtitleMode": string;
+      "groupColor1": string;
+      "groupColor2": string;
+      "groupColor3": string;
+      "groupColor4": string;
+      "groupColor5": string;
+      "groupColor6": string;
     };
   }
 }

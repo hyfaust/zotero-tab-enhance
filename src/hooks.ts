@@ -83,6 +83,12 @@ function syncAllWindowsFeatures(): void {
   Zotero.getMainWindows().forEach((win) => syncWindowFeatures(win));
 }
 
+function refreshAllVerticalSidebars(): void {
+  addon.verticalTabSidebarInstances.forEach((verticalTabSidebar) => {
+    verticalTabSidebar.refreshDisplayPrefs();
+  });
+}
+
 function unregisterTabNotifier() {
   if (!addon.data.tabNotifierID) {
     return;
@@ -196,6 +202,9 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
       break;
     case "featureToggle":
       syncAllWindowsFeatures();
+      break;
+    case "displayPrefsChanged":
+      refreshAllVerticalSidebars();
       break;
     default:
       return;

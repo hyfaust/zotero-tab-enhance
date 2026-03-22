@@ -1,10 +1,5 @@
-import {
-  GROUP_COLOR_PALETTE,
-  TrackedTab,
-  VirtualGroup,
-  VirtualGroupMember,
-  makeVirtualMemberKey,
-} from "./types";
+import { TrackedTab, VirtualGroup, VirtualGroupMember, makeVirtualMemberKey } from "./types";
+import { getGroupColorPalette } from "../../utils/prefs";
 
 type GroupStoreListener = (groups: VirtualGroup[]) => void;
 
@@ -401,7 +396,8 @@ export default class TabGroupStore {
   }
 
   private pickNextColor(): string {
-    return GROUP_COLOR_PALETTE[this.groups.length % GROUP_COLOR_PALETTE.length];
+    const palette = getGroupColorPalette();
+    return palette[this.groups.length % palette.length];
   }
 
   private makeID(prefix: string): string {

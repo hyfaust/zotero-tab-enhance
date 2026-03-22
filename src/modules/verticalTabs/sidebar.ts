@@ -1,11 +1,10 @@
 import { config } from "../../../package.json";
 import { getString } from "../../utils/locale";
-import { getJSONPref, setJSONPref } from "../../utils/prefs";
+import { getGroupColorPalette, getJSONPref, getPref, setJSONPref } from "../../utils/prefs";
 import TabTrackerService from "./tabTracker";
 import TabCommandController, { TabCommandItem } from "./tabCommands";
 import TabGroupStore from "./groupStore";
 import {
-  GROUP_COLOR_PALETTE,
   LIBRARY_TAB_ID,
   SidebarState,
   TabTrackerSnapshot,
@@ -225,6 +224,13 @@ export default class VerticalTabSidebar {
     this.window.addEventListener("mouseup", this.handleResizeEnd);
     this.window.addEventListener("dragend", this.handleWindowDragEnd, true);
     ztoolkit.log("VerticalTabSidebar initialized");
+  }
+
+  public refreshDisplayPrefs(): void {
+    if (!this.initialized) {
+      return;
+    }
+    this.render(this.tracker.getSnapshot());
   }
 
   public destroy(): void {
@@ -694,7 +700,7 @@ export default class VerticalTabSidebar {
           color:
             typeof group.color === "string" && group.color.trim()
               ? group.color
-              : GROUP_COLOR_PALETTE[groupIndex % GROUP_COLOR_PALETTE.length],
+              : getGroupColorPalette()[groupIndex % getGroupColorPalette().length],
           collapsed: Boolean(group.collapsed),
           sortMode:
             group.sortMode === "recent" ||
@@ -1314,7 +1320,7 @@ export default class VerticalTabSidebar {
     }
 
     const haystack =
-      `${tab.title} ${this.getMetaText(tab)}`.toLocaleLowerCase();
+      `${tab.title} ${this.getDisplayTitle(tab)} ${this.getDisplaySubtitle(tab)} ${this.getMetaText(tab)}`.toLocaleLowerCase();
     return haystack.includes(this.searchQuery);
   }
 
@@ -1337,7 +1343,7 @@ export default class VerticalTabSidebar {
     }
 
     const haystack =
-      `${member.title} ${this.getVirtualMemberMetaText(member)}`.toLocaleLowerCase();
+      `${member.title} ${this.getDisplayTitle(member)} ${this.getDisplaySubtitle(member)} ${this.getVirtualMemberMetaText(member)}`.toLocaleLowerCase();
     return haystack.includes(this.searchQuery);
   }
 
@@ -1406,7 +1412,12 @@ export default class VerticalTabSidebar {
     }
 
     row.appendChild(this.renderBadge(tab.iconKey));
-    row.appendChild(this.renderRowContent(tab.title, this.getMetaText(tab)));
+    row.appendChild(
+      this.renderRowContent(
+        this.getDisplayTitle(tab),
+        this.getDisplaySubtitle(tab),
+      ),
+    );
 
     if (!this.collapsed && tab.tabId) {
       row.appendChild(
@@ -1467,8 +1478,8 @@ export default class VerticalTabSidebar {
     row.appendChild(this.renderBadge(member.iconKey));
     row.appendChild(
       this.renderRowContent(
-        member.title,
-        this.getVirtualMemberMetaText(member),
+        this.getDisplayTitle(member),
+        this.getDisplaySubtitle(member),
       ),
     );
 
@@ -1508,7 +1519,9 @@ export default class VerticalTabSidebar {
     }) as HTMLSpanElement;
 
     content.appendChild(title);
-    content.appendChild(meta);
+    if (metaText.trim()) {
+      content.appendChild(meta);
+    }
     return content;
   }
 
@@ -2183,7 +2196,8 @@ export default class VerticalTabSidebar {
     menu.setAttribute("label", getString("change-group-color"));
     const popup = ztoolkit.createXULElement(this.document, "menupopup");
 
-    GROUP_COLOR_PALETTE.forEach((color, index) => {
+    const palette = getGroupColorPalette();
+    palette.forEach((color, index) => {
       popup.appendChild(
         this.createMenuItem(
           `${getString("group-color")} ${index + 1}`,
@@ -2700,14 +2714,50 @@ export default class VerticalTabSidebar {
     }
   }
 
-  private getMetaText(tab: TrackedTab): string {
-    const parts = [tab.type];
-    if (tab.parentItemID != null && tab.parentItemID !== tab.itemID) {
-      parts.push(`item ${tab.parentItemID}`);
-    } else if (tab.itemID != null) {
-      parts.push(`item ${tab.itemID}`);
+  private getDisplayTitle(
+    input: Pick<TrackedTab | VirtualGroupMember, "title" | "itemID" | "parentItemID">,
+  ): string {
+    const mode = getPref("verticalTabTitleMode");
+    if (mode === "shortTitle") {
+      const item = this.getDisplayItem(input);
+      const shortTitle = this.getItemField(item, ["shortTitle"]);
+      if (shortTitle) {
+        return shortTitle;
+      }
     }
-    return parts.join(" · ");
+    return input.title?.trim() || "Untitled";
+  }
+
+  private getDisplaySubtitle(
+    input: Pick<
+      TrackedTab | VirtualGroupMember,
+      "type" | "itemID" | "parentItemID" | "isOpen"
+    >,
+  ): string {
+    const mode = getPref("verticalTabSubtitleMode");
+    switch (mode) {
+      case "none":
+        return "";
+      case "typeAndItem":
+        return this.getLegacyMetaText(input);
+      case "creatorYear":
+        return (
+          this.getCreatorYearText(this.getDisplayItem(input)) ||
+          this.getSourceText(this.getDisplayItem(input)) ||
+          this.getLegacyMetaText(input)
+        );
+      case "source":
+      default:
+        return (
+          this.getSourceText(this.getDisplayItem(input)) ||
+          this.getCreatorYearText(this.getDisplayItem(input)) ||
+          this.getLegacyMetaText(input)
+        );
+    }
+  }
+
+  private getMetaText(tab: TrackedTab): string {
+    return this.getLegacyMetaText(tab);
   }
 
   private getVirtualMemberMetaText(
@@ -2716,12 +2766,81 @@ export default class VerticalTabSidebar {
       "type" | "itemID" | "parentItemID" | "isOpen"
     >,
   ): string {
-    const parts = [member.isOpen ? member.type : `${member.type} · virtual`];
-    if (member.parentItemID != null && member.parentItemID !== member.itemID) {
-      parts.push(`item ${member.parentItemID}`);
-    } else if (member.itemID != null) {
-      parts.push(`item ${member.itemID}`);
+    return this.getLegacyMetaText(member);
+  }
+
+  private getLegacyMetaText(
+    input: Pick<
+      TrackedTab | VirtualGroupMember,
+      "type" | "itemID" | "parentItemID" | "isOpen"
+    >,
+  ): string {
+    const parts = [
+      "isOpen" in input && input.isOpen === false
+        ? `${input.type} · virtual`
+        : input.type,
+    ];
+    if (input.parentItemID != null && input.parentItemID !== input.itemID) {
+      parts.push(`item ${input.parentItemID}`);
+    } else if (input.itemID != null) {
+      parts.push(`item ${input.itemID}`);
     }
     return parts.join(" · ");
+  }
+
+  private getDisplayItem(
+    input: Pick<TrackedTab | VirtualGroupMember, "itemID" | "parentItemID">,
+  ): any | null {
+    const ids = [input.parentItemID, input.itemID].filter(
+      (value, index, array): value is number =>
+        typeof value === "number" && array.indexOf(value) === index,
+    );
+    for (const id of ids) {
+      const item = Zotero.Items.get(id);
+      if (item) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  private getItemField(item: any | null, fields: string[]): string {
+    if (!item) {
+      return "";
+    }
+    for (const field of fields) {
+      try {
+        const value = item.getField(field);
+        if (typeof value === "string" && value.trim()) {
+          return value.trim();
+        }
+      } catch {
+        continue;
+      }
+    }
+    return "";
+  }
+
+  private getSourceText(item: any | null): string {
+    return this.getItemField(item, [
+      "publicationTitle",
+      "proceedingsTitle",
+      "bookTitle",
+      "websiteTitle",
+      "forumTitle",
+      "blogTitle",
+      "seriesTitle",
+    ]);
+  }
+
+  private getCreatorYearText(item: any | null): string {
+    const creator = this.getItemField(item, ["firstCreator"]);
+    const rawYear = this.getItemField(item, ["year", "date"]);
+    const yearMatch = rawYear.match(/(19|20)\d{2}/);
+    const year = yearMatch?.[0] ?? "";
+    if (creator && year) {
+      return `${creator} · ${year}`;
+    }
+    return creator || year;
   }
 }
