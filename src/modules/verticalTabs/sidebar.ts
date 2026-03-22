@@ -73,6 +73,7 @@ export default class VerticalTabSidebar {
   private dragOverMemberKey: string | null = null;
   private dragOverHeaderGroupId: string | null = null;
   private dragOverPosition: DropPosition | null = null;
+  private pendingGroupToggleTimers = new Map<string, number>();
 
   private readonly handleResizeEnd = () => {
     if (!this.sidebar || this.collapsed) {
@@ -245,6 +246,10 @@ export default class VerticalTabSidebar {
     this.unsubscribeTracker = undefined;
     this.unsubscribeGroupStore?.();
     this.unsubscribeGroupStore = undefined;
+    this.pendingGroupToggleTimers.forEach((timerId) => {
+      this.window.clearTimeout(timerId);
+    });
+    this.pendingGroupToggleTimers.clear();
     this.window.removeEventListener("mouseup", this.handleResizeEnd);
     this.window.removeEventListener("dragend", this.handleWindowDragEnd, true);
 
@@ -1000,6 +1005,7 @@ export default class VerticalTabSidebar {
     container.dataset.groupId = renderable.group.id;
     container.style.setProperty("--group-color", renderable.group.color);
     container.classList.toggle("is-expanded", !renderable.group.collapsed);
+    container.classList.toggle("is-collapsed", renderable.group.collapsed);
 
     const header = ztoolkit.UI.createElement(this.document, "div", {
       namespace: "html",
@@ -1018,7 +1024,11 @@ export default class VerticalTabSidebar {
           listener: (event: Event) => {
             event.preventDefault();
             event.stopPropagation();
-            this.groupStore.toggleCollapsed(renderable.group.id);
+            this.requestGroupCollapsedToggle(
+              renderable.group.id,
+              renderable.group.collapsed,
+              container,
+            );
           },
         },
         {
@@ -1030,7 +1040,11 @@ export default class VerticalTabSidebar {
             }
             keyboardEvent.preventDefault();
             keyboardEvent.stopPropagation();
-            this.groupStore.toggleCollapsed(renderable.group.id);
+            this.requestGroupCollapsedToggle(
+              renderable.group.id,
+              renderable.group.collapsed,
+              container,
+            );
           },
         },
         {
@@ -1107,42 +1121,82 @@ export default class VerticalTabSidebar {
     header.appendChild(count);
     container.appendChild(header);
 
-    if (!renderable.group.collapsed) {
-      const members = ztoolkit.UI.createElement(this.document, "div", {
-        namespace: "html",
-        classList: ["tab-enhance-vertical-group-members"],
-      }) as HTMLDivElement;
+    const members = ztoolkit.UI.createElement(this.document, "div", {
+      namespace: "html",
+      classList: ["tab-enhance-vertical-group-members"],
+      attributes: {
+        "aria-hidden": renderable.group.collapsed ? "true" : "false",
+      },
+    }) as HTMLDivElement;
+    members.style.setProperty(
+      "--group-members-max-height",
+      `${Math.max(72, renderable.members.length * 72)}px`,
+    );
 
-      renderable.members.forEach((member) => {
-        if (
-          renderable.group.id === this.dragOverGroupId &&
-          member.key === this.dragOverMemberKey &&
-          this.dragOverPosition === "before"
-        ) {
-          members.appendChild(this.renderDropPlaceholder());
-        }
+    renderable.members.forEach((member) => {
+      if (
+        renderable.group.id === this.dragOverGroupId &&
+        member.key === this.dragOverMemberKey &&
+        this.dragOverPosition === "before"
+      ) {
+        members.appendChild(this.renderDropPlaceholder());
+      }
 
-        members.appendChild(
-          this.renderGroupMemberRow(
-            member,
-            renderable.group.id,
-            selectedTabKey,
-          ),
-        );
+      members.appendChild(
+        this.renderGroupMemberRow(
+          member,
+          renderable.group.id,
+          selectedTabKey,
+        ),
+      );
 
-        if (
-          renderable.group.id === this.dragOverGroupId &&
-          member.key === this.dragOverMemberKey &&
-          this.dragOverPosition === "after"
-        ) {
-          members.appendChild(this.renderDropPlaceholder());
-        }
-      });
+      if (
+        renderable.group.id === this.dragOverGroupId &&
+        member.key === this.dragOverMemberKey &&
+        this.dragOverPosition === "after"
+      ) {
+        members.appendChild(this.renderDropPlaceholder());
+      }
+    });
 
-      container.appendChild(members);
-    }
+    container.appendChild(members);
 
     return container;
+  }
+
+  private requestGroupCollapsedToggle(
+    groupId: string,
+    isCurrentlyCollapsed: boolean,
+    container: HTMLDivElement,
+  ): void {
+    if (this.pendingGroupToggleTimers.has(groupId)) {
+      return;
+    }
+
+    const nextCollapsed = !isCurrentlyCollapsed;
+    const chevron = container.querySelector(
+      ".tab-enhance-vertical-group-chevron",
+    ) as HTMLSpanElement | null;
+    const members = container.querySelector(
+      ".tab-enhance-vertical-group-members",
+    ) as HTMLDivElement | null;
+
+    if (chevron) {
+      chevron.textContent = nextCollapsed ? "▸" : "▾";
+    }
+    if (members) {
+      members.setAttribute("aria-hidden", nextCollapsed ? "true" : "false");
+    }
+
+    container.classList.add("is-transitioning");
+    container.classList.toggle("is-expanded", !nextCollapsed);
+    container.classList.toggle("is-collapsed", nextCollapsed);
+
+    const timerId = this.window.setTimeout(() => {
+      this.pendingGroupToggleTimers.delete(groupId);
+      this.groupStore.toggleCollapsed(groupId);
+    }, 250);
+    this.pendingGroupToggleTimers.set(groupId, timerId);
   }
 
   private getRenderableGroups(openTabs: TrackedTab[]): RenderableGroup[] {

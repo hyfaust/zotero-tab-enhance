@@ -14,8 +14,8 @@ export const GROUP_COLOR_PREF_KEYS = [
   "groupColor6",
 ] as const;
 const DEFAULT_PREF_VALUES: PluginPrefsMap = {
-  enableVerticalTabs: true,
-  enableHorizontalTabEnhance: true,
+  enableVerticalTabs: false,
+  enableHorizontalTabEnhance: false,
   enableCopyReference: true,
   enableGoToAttachment: true,
   enableReloadTab: true,
