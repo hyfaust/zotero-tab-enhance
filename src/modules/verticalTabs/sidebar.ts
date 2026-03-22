@@ -477,16 +477,10 @@ export default class VerticalTabSidebar {
       this.sidebar.classList.add("is-collapsed");
       this.sidebar.style.width = `${COLLAPSED_WIDTH}px`;
       this.splitter.setAttribute("hidden", "true");
-      this.searchInput?.setAttribute("hidden", "true");
-      this.viewSwitcher?.setAttribute("hidden", "true");
-      this.createGroupButton?.setAttribute("hidden", "true");
     } else {
       this.sidebar.classList.remove("is-collapsed");
       this.sidebar.style.width = `${this.expandedWidth}px`;
       this.splitter.removeAttribute("hidden");
-      this.searchInput?.removeAttribute("hidden");
-      this.viewSwitcher?.removeAttribute("hidden");
-      this.createGroupButton?.removeAttribute("hidden");
     }
   }
 
@@ -688,7 +682,7 @@ export default class VerticalTabSidebar {
 
     this.hideContextMenu();
     this.updateViewSwitcher();
-    this.headerTitle.textContent = this.collapsed ? "" : this.getViewTitle();
+    this.headerTitle.textContent = this.getViewTitle();
     this.countBadge.textContent = String(openTabs.length);
     listContainer.textContent = "";
 
@@ -869,7 +863,7 @@ export default class VerticalTabSidebar {
       namespace: "html",
       classList: ["tab-enhance-vertical-aggregate-title"],
       properties: {
-        textContent: this.collapsed ? "" : section.title,
+        textContent: section.title,
       },
     }) as HTMLSpanElement;
 
@@ -906,6 +900,7 @@ export default class VerticalTabSidebar {
       classList: ["tab-enhance-vertical-group"],
     }) as HTMLDivElement;
     container.style.setProperty("--group-color", renderable.group.color);
+    container.classList.toggle("is-expanded", !renderable.group.collapsed);
 
     const header = ztoolkit.UI.createElement(this.document, "div", {
       namespace: "html",
@@ -971,7 +966,7 @@ export default class VerticalTabSidebar {
       namespace: "html",
       classList: ["tab-enhance-vertical-group-title"],
       properties: {
-        textContent: this.collapsed ? "" : renderable.group.name,
+        textContent: renderable.group.name,
       },
     }) as HTMLSpanElement;
 
@@ -1302,7 +1297,7 @@ export default class VerticalTabSidebar {
       namespace: "html",
       classList: ["tab-enhance-vertical-tab-title"],
       properties: {
-        textContent: this.collapsed ? "" : titleText,
+        textContent: titleText,
       },
     }) as HTMLSpanElement;
 
@@ -1310,7 +1305,7 @@ export default class VerticalTabSidebar {
       namespace: "html",
       classList: ["tab-enhance-vertical-tab-meta"],
       properties: {
-        textContent: this.collapsed ? "" : metaText,
+        textContent: metaText,
       },
     }) as HTMLSpanElement;
 
