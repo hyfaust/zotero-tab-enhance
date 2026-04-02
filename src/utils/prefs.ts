@@ -5,6 +5,25 @@ type PluginPrefsMap = _ZoteroTypes.Prefs["PluginPrefsMap"];
 type PrefValue = string | number | boolean;
 
 const PREFS_PREFIX = config.prefsPrefix;
+export const PLUGIN_PREF_KEYS = [
+  "enableVerticalTabs",
+  "enableHorizontalTabEnhance",
+  "enableCopyReference",
+  "enableGoToAttachment",
+  "enableReloadTab",
+  "verticalTabTitleMode",
+  "verticalTabSubtitleMode",
+  "groupColor1",
+  "groupColor2",
+  "groupColor3",
+  "groupColor4",
+  "groupColor5",
+  "groupColor6",
+] as const;
+export const PERSISTED_STATE_PREF_KEYS = [
+  "verticalTabs.sidebarState",
+  "verticalTabs.groups",
+] as const;
 export const GROUP_COLOR_PREF_KEYS = [
   "groupColor1",
   "groupColor2",
@@ -112,6 +131,15 @@ export function getGroupColorPalette(): string[] {
   return GROUP_COLOR_PREF_KEYS.map((key, index) =>
     normalizeHexColor(getPref(key), GROUP_COLOR_PALETTE[index]),
   );
+}
+
+export function resetPluginPrefsToDefaults() {
+  PLUGIN_PREF_KEYS.forEach((key) => {
+    clearPref(key);
+  });
+  PERSISTED_STATE_PREF_KEYS.forEach((key) => {
+    clearPref(key);
+  });
 }
 
 /**

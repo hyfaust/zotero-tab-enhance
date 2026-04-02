@@ -26,6 +26,8 @@ function isReaderTab(tab: _ZoteroTypes.TabInstance | TrackedTab | null | undefin
 
 export default class TabCommandController {
   private readonly window: _ZoteroTypes.MainWindow;
+  private static readonly RELOAD_CLOSE_TIMEOUT_MS = 800;
+  private static readonly RELOAD_CLOSE_POLL_MS = 20;
 
   constructor(window: _ZoteroTypes.MainWindow) {
     this.window = window;
@@ -36,8 +38,14 @@ export default class TabCommandController {
       return;
     }
 
+    const nativeTab = this.getNativeTab(tabId, false);
+    if (!nativeTab) {
+      ztoolkit.log("TabCommandController.select skipped missing tab", tabId);
+      return;
+    }
+
     try {
-      this.window.Zotero_Tabs.select(tabId);
+      this.window.Zotero_Tabs.select(nativeTab.id);
     } catch (error) {
       ztoolkit.log("TabCommandController.select failed", tabId, error);
     }
@@ -48,8 +56,13 @@ export default class TabCommandController {
       return;
     }
 
+    const nativeTab = this.getNativeTab(tabId, false);
+    if (!nativeTab) {
+      return;
+    }
+
     try {
-      this.window.Zotero_Tabs.close(tabId);
+      this.window.Zotero_Tabs.close(nativeTab.id);
     } catch (error) {
       ztoolkit.log("TabCommandController.close failed", tabId, error);
     }
@@ -127,8 +140,9 @@ export default class TabCommandController {
 
   public async reload(tabId: string | null): Promise<void> {
     try {
-      const tab = this.getNativeTab(tabId);
-      if (!tab || !isReaderTab(tab)) {
+      const entry = this.getNativeTabEntry(tabId);
+      const tab = entry?.tab ?? null;
+      if (!entry || !tab || !isReaderTab(tab)) {
         return;
       }
 
@@ -137,7 +151,12 @@ export default class TabCommandController {
         return;
       }
       const item = Zotero.Items.get(itemID);
-      this.window.Zotero_Tabs.close(tabId!);
+      if (!item) {
+        return;
+      }
+
+      this.window.Zotero_Tabs.close(entry.tab.id);
+      await this.waitForTabToClose(entry.tab.id);
       await (Zotero as any).FileHandlers.open(item);
     } catch (error) {
       ztoolkit.log("TabCommandController.reload failed", tabId, error);
@@ -255,5 +274,21 @@ export default class TabCommandController {
       }
       return null;
     }
+  }
+
+  private async waitForTabToClose(tabId: string): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < TabCommandController.RELOAD_CLOSE_TIMEOUT_MS) {
+      if (!this.getNativeTab(tabId, false)) {
+        return;
+      }
+      await this.wait(TabCommandController.RELOAD_CLOSE_POLL_MS);
+    }
+  }
+
+  private wait(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      this.window.setTimeout(resolve, ms);
+    });
   }
 }

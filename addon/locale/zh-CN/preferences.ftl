@@ -30,3 +30,6 @@ pref-group-color-3 = 颜色 3
 pref-group-color-4 = 颜色 4
 pref-group-color-5 = 颜色 5
 pref-group-color-6 = 颜色 6
+
+pref-data-reset = 数据重置
+pref-reset-plugin-data = 一键清除插件持久化数据并恢复初始化状态

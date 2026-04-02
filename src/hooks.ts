@@ -4,8 +4,9 @@ import TabEnhance from "./modules/tabEnhance";
 import VerticalTabSidebar from "./modules/verticalTabs/sidebar";
 import TabTrackerService from "./modules/verticalTabs/tabTracker";
 import { initLocale } from "./utils/locale";
-import { getPref } from "./utils/prefs";
+import { getPref, resetPluginPrefsToDefaults } from "./utils/prefs";
 import { createZToolkit } from "./utils/ztoolkit";
+import { syncPrefControls } from "./modules/preferenceScript";
 
 function registerTabNotifier() {
   if (addon.data.tabNotifierID) {
@@ -205,6 +206,19 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
       break;
     case "displayPrefsChanged":
       refreshAllVerticalSidebars();
+      break;
+    case "resetPluginData":
+      addon.data.resettingPluginData = true;
+      try {
+        resetPluginPrefsToDefaults();
+        syncAllWindowsFeatures();
+        refreshAllVerticalSidebars();
+        if (data.window) {
+          syncPrefControls(data.window);
+        }
+      } finally {
+        addon.data.resettingPluginData = false;
+      }
       break;
     default:
       return;

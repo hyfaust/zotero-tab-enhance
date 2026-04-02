@@ -29,3 +29,6 @@ pref-group-color-3 = Color 3
 pref-group-color-4 = Color 4
 pref-group-color-5 = Color 5
 pref-group-color-6 = Color 6
+
+pref-data-reset = Data Reset
+pref-reset-plugin-data = Clear all persisted plugin data and restore the initial state
