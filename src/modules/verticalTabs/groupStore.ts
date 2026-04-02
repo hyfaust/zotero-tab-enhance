@@ -1,4 +1,10 @@
-import { TrackedTab, VirtualGroup, VirtualGroupMember, makeVirtualMemberKey } from "./types";
+import {
+  TrackedTab,
+  VirtualGroup,
+  VirtualGroupMember,
+  makeVirtualMemberKey,
+  makeVirtualMemberLookupKeys,
+} from "./types";
 import { getGroupColorPalette } from "../../utils/prefs";
 
 type GroupStoreListener = (groups: VirtualGroup[]) => void;
@@ -40,9 +46,14 @@ export default class TabGroupStore {
   }
 
   public syncTrackedTabs(tabs: TrackedTab[]): boolean {
-    const openTabsByMemberKey = new Map(
-      tabs.map((tab) => [this.makeMemberKeyFromTab(tab), tab] as const),
-    );
+    const openTabsByMemberKey = new Map<string, TrackedTab>();
+    tabs.forEach((tab) => {
+      this.getMemberLookupKeysFromTab(tab).forEach((key) => {
+        if (!openTabsByMemberKey.has(key)) {
+          openTabsByMemberKey.set(key, tab);
+        }
+      });
+    });
     let changed = false;
 
     this.groups = this.groups.map((group) => ({
@@ -359,6 +370,16 @@ export default class TabGroupStore {
 
   public makeMemberKeyFromTab(tab: TrackedTab): string {
     return makeVirtualMemberKey({
+      itemID: tab.itemID,
+      parentItemID: tab.parentItemID,
+      tabId: tab.tabId,
+      type: tab.type,
+      title: tab.title,
+    });
+  }
+
+  public getMemberLookupKeysFromTab(tab: TrackedTab): string[] {
+    return makeVirtualMemberLookupKeys({
       itemID: tab.itemID,
       parentItemID: tab.parentItemID,
       tabId: tab.tabId,

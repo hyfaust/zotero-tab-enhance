@@ -1,7 +1,9 @@
 <linkset>
   <html:link rel="localization" href="__addonRef__-preferences.ftl" />
 </linkset>
-<groupbox onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })">
+<groupbox
+  onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
+>
   <label><html:h2 data-l10n-id="pref-feature-groups"></html:h2></label>
   <checkbox
     id="__addonRef__-pref-enable-vertical-tabs"
@@ -15,23 +17,46 @@
   />
 </groupbox>
 
-
 <groupbox>
   <label><html:h2 data-l10n-id="pref-tab-display"></html:h2></label>
   <vbox>
-    <html:label for="__addonRef__-pref-vertical-tab-title-mode" data-l10n-id="pref-vertical-tab-title-mode"></html:label>
+    <html:label
+      for="__addonRef__-pref-vertical-tab-title-mode"
+      data-l10n-id="pref-vertical-tab-title-mode"
+    ></html:label>
     <html:select id="__addonRef__-pref-vertical-tab-title-mode">
-      <html:option value="title" data-l10n-id="pref-vertical-tab-title-mode-title"></html:option>
-      <html:option value="shortTitle" data-l10n-id="pref-vertical-tab-title-mode-short-title"></html:option>
+      <html:option
+        value="title"
+        data-l10n-id="pref-vertical-tab-title-mode-title"
+      ></html:option>
+      <html:option
+        value="shortTitle"
+        data-l10n-id="pref-vertical-tab-title-mode-short-title"
+      ></html:option>
     </html:select>
   </vbox>
   <vbox>
-    <html:label for="__addonRef__-pref-vertical-tab-subtitle-mode" data-l10n-id="pref-vertical-tab-subtitle-mode"></html:label>
+    <html:label
+      for="__addonRef__-pref-vertical-tab-subtitle-mode"
+      data-l10n-id="pref-vertical-tab-subtitle-mode"
+    ></html:label>
     <html:select id="__addonRef__-pref-vertical-tab-subtitle-mode">
-      <html:option value="source" data-l10n-id="pref-vertical-tab-subtitle-mode-source"></html:option>
-      <html:option value="creatorYear" data-l10n-id="pref-vertical-tab-subtitle-mode-creator-year"></html:option>
-      <html:option value="typeAndItem" data-l10n-id="pref-vertical-tab-subtitle-mode-type-and-item"></html:option>
-      <html:option value="none" data-l10n-id="pref-vertical-tab-subtitle-mode-none"></html:option>
+      <html:option
+        value="source"
+        data-l10n-id="pref-vertical-tab-subtitle-mode-source"
+      ></html:option>
+      <html:option
+        value="creatorYear"
+        data-l10n-id="pref-vertical-tab-subtitle-mode-creator-year"
+      ></html:option>
+      <html:option
+        value="typeAndItem"
+        data-l10n-id="pref-vertical-tab-subtitle-mode-type-and-item"
+      ></html:option>
+      <html:option
+        value="none"
+        data-l10n-id="pref-vertical-tab-subtitle-mode-none"
+      ></html:option>
     </html:select>
   </vbox>
 </groupbox>
@@ -39,27 +64,45 @@
 <groupbox>
   <label><html:h2 data-l10n-id="pref-group-colors"></html:h2></label>
   <vbox>
-    <html:label for="__addonRef__-pref-group-color-1" data-l10n-id="pref-group-color-1"></html:label>
+    <html:label
+      for="__addonRef__-pref-group-color-1"
+      data-l10n-id="pref-group-color-1"
+    ></html:label>
     <html:input id="__addonRef__-pref-group-color-1" type="color" />
   </vbox>
   <vbox>
-    <html:label for="__addonRef__-pref-group-color-2" data-l10n-id="pref-group-color-2"></html:label>
+    <html:label
+      for="__addonRef__-pref-group-color-2"
+      data-l10n-id="pref-group-color-2"
+    ></html:label>
     <html:input id="__addonRef__-pref-group-color-2" type="color" />
   </vbox>
   <vbox>
-    <html:label for="__addonRef__-pref-group-color-3" data-l10n-id="pref-group-color-3"></html:label>
+    <html:label
+      for="__addonRef__-pref-group-color-3"
+      data-l10n-id="pref-group-color-3"
+    ></html:label>
     <html:input id="__addonRef__-pref-group-color-3" type="color" />
   </vbox>
   <vbox>
-    <html:label for="__addonRef__-pref-group-color-4" data-l10n-id="pref-group-color-4"></html:label>
+    <html:label
+      for="__addonRef__-pref-group-color-4"
+      data-l10n-id="pref-group-color-4"
+    ></html:label>
     <html:input id="__addonRef__-pref-group-color-4" type="color" />
   </vbox>
   <vbox>
-    <html:label for="__addonRef__-pref-group-color-5" data-l10n-id="pref-group-color-5"></html:label>
+    <html:label
+      for="__addonRef__-pref-group-color-5"
+      data-l10n-id="pref-group-color-5"
+    ></html:label>
     <html:input id="__addonRef__-pref-group-color-5" type="color" />
   </vbox>
   <vbox>
-    <html:label for="__addonRef__-pref-group-color-6" data-l10n-id="pref-group-color-6"></html:label>
+    <html:label
+      for="__addonRef__-pref-group-color-6"
+      data-l10n-id="pref-group-color-6"
+    ></html:label>
     <html:input id="__addonRef__-pref-group-color-6" type="color" />
   </vbox>
 </groupbox>
@@ -81,6 +124,14 @@
     data-l10n-id="pref-enable-reload-tab"
     preference="__prefsPrefix__.enableReloadTab"
   />
+</groupbox>
+
+<groupbox>
+  <label><html:h2 data-l10n-id="pref-data-reset"></html:h2></label>
+  <html:button
+    id="__addonRef__-pref-reset-plugin-data"
+    data-l10n-id="pref-reset-plugin-data"
+  ></html:button>
 </groupbox>
 
 <vbox>

@@ -2,13 +2,30 @@ import { config } from "../../package.json";
 import { getString } from "../utils/locale";
 import { GROUP_COLOR_PREF_KEYS, getPref, setPref } from "../utils/prefs";
 
-const PREF_CONTROL_IDS = [
-  `${config.addonRef}-pref-enable-vertical-tabs`,
-  `${config.addonRef}-pref-enable-horizontal-tab-enhance`,
-  `${config.addonRef}-pref-enable-copy-reference`,
-  `${config.addonRef}-pref-enable-go-to-attachment`,
-  `${config.addonRef}-pref-enable-reload-tab`,
+const PREF_CONTROL_CONFIG = [
+  {
+    id: `${config.addonRef}-pref-enable-vertical-tabs`,
+    key: "enableVerticalTabs" as const,
+  },
+  {
+    id: `${config.addonRef}-pref-enable-horizontal-tab-enhance`,
+    key: "enableHorizontalTabEnhance" as const,
+  },
+  {
+    id: `${config.addonRef}-pref-enable-copy-reference`,
+    key: "enableCopyReference" as const,
+  },
+  {
+    id: `${config.addonRef}-pref-enable-go-to-attachment`,
+    key: "enableGoToAttachment" as const,
+  },
+  {
+    id: `${config.addonRef}-pref-enable-reload-tab`,
+    key: "enableReloadTab" as const,
+  },
 ] as const;
+
+const RESET_BUTTON_ID = `${config.addonRef}-pref-reset-plugin-data`;
 
 const DISPLAY_SELECT_CONFIG = [
   {
@@ -52,7 +69,7 @@ function bindPrefEvents() {
     return;
   }
 
-  PREF_CONTROL_IDS.forEach((id) => {
+  PREF_CONTROL_CONFIG.forEach(({ id }) => {
     prefsWindow.document.getElementById(id)?.addEventListener("command", () => {
       void addon.hooks.onPrefsEvent("featureToggle", {});
     });
@@ -84,10 +101,49 @@ function bindPrefEvents() {
     input.addEventListener("change", syncColor);
   });
 
+  prefsWindow.document.getElementById(RESET_BUTTON_ID)?.addEventListener("click", async () => {
+    await addon.hooks.onPrefsEvent("resetPluginData", {
+      window: prefsWindow,
+    });
+    syncPrefControls(prefsWindow);
+  });
+
   const prefsState = addon.data.prefs;
   if (prefsState) {
     prefsState.bound = true;
   }
 }
 
-export { initPreference, registerPrefsScripts, bindPrefEvents };
+function syncPrefControls(window: Window) {
+  PREF_CONTROL_CONFIG.forEach(({ id, key }) => {
+    const checkbox = window.document.getElementById(id) as
+      | HTMLInputElement
+      | XULCheckboxElement
+      | null;
+    if (!checkbox) {
+      return;
+    }
+    const value = Boolean(getPref(key));
+    if ("checked" in checkbox) {
+      checkbox.checked = value;
+    }
+  });
+
+  DISPLAY_SELECT_CONFIG.forEach(({ id, key }) => {
+    const select = window.document.getElementById(id) as HTMLSelectElement | null;
+    if (!select) {
+      return;
+    }
+    select.value = String(getPref(key));
+  });
+
+  GROUP_COLOR_INPUT_CONFIG.forEach(({ id, key }) => {
+    const input = window.document.getElementById(id) as HTMLInputElement | null;
+    if (!input) {
+      return;
+    }
+    input.value = String(getPref(key));
+  });
+}
+
+export { initPreference, registerPrefsScripts, bindPrefEvents, syncPrefControls };

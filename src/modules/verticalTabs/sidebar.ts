@@ -77,6 +77,7 @@ export default class VerticalTabSidebar {
   private dragOverHeaderGroupId: string | null = null;
   private dragOverPosition: DropPosition | null = null;
   private pendingGroupToggleTimers = new Map<string, number>();
+  private pendingMemberOpenPromises = new Map<string, Promise<boolean>>();
   private lastContextMenuPoint = { x: 0, y: 0 };
   private pendingGroupNameSubmit?: ((name: string) => void) | null;
   private groupNamePanelConfirmed = false;
@@ -250,8 +251,10 @@ export default class VerticalTabSidebar {
       return;
     }
 
-    this.persistSidebarState();
-    this.persistGroupsState();
+    if (!addon.data.resettingPluginData) {
+      this.persistSidebarState();
+      this.persistGroupsState();
+    }
 
     this.unsubscribeTracker?.();
     this.unsubscribeTracker = undefined;
@@ -261,6 +264,7 @@ export default class VerticalTabSidebar {
       this.window.clearTimeout(timerId);
     });
     this.pendingGroupToggleTimers.clear();
+    this.pendingMemberOpenPromises.clear();
     this.window.removeEventListener("mouseup", this.handleResizeEnd);
     this.window.removeEventListener("dragend", this.handleWindowDragEnd, true);
 
@@ -811,10 +815,11 @@ export default class VerticalTabSidebar {
     this.trackedTabsByMemberKey.clear();
     openTabs.forEach((tab) => {
       this.trackedTabsByKey.set(tab.key, tab);
-      this.trackedTabsByMemberKey.set(
-        this.groupStore.makeMemberKeyFromTab(tab),
-        tab,
-      );
+      this.groupStore.getMemberLookupKeysFromTab(tab).forEach((key) => {
+        if (!this.trackedTabsByMemberKey.has(key)) {
+          this.trackedTabsByMemberKey.set(key, tab);
+        }
+      });
     });
     this.hideContextMenu();
     this.updateViewSwitcher();
@@ -1278,11 +1283,6 @@ export default class VerticalTabSidebar {
   }
   private getRenderableGroups(openTabs: TrackedTab[]): RenderableGroup[] {
     const groups = this.groupStore.getGroups();
-    const openTabMap = new Map(
-      openTabs.map(
-        (tab) => [this.groupStore.makeMemberKeyFromTab(tab), tab] as const,
-      ),
-    );
 
     return groups
       .map((group) => {
@@ -1292,7 +1292,7 @@ export default class VerticalTabSidebar {
             return true;
           }
 
-          const liveTab = openTabMap.get(member.key);
+          const liveTab = this.findTrackedTabByMemberKey(member.key);
           return this.matchesGroupMember(liveTab ?? member);
         });
 
@@ -1303,7 +1303,7 @@ export default class VerticalTabSidebar {
         return {
           group,
           members: members.map((member) => {
-            const liveTab = openTabMap.get(member.key);
+            const liveTab = this.findTrackedTabByMemberKey(member.key);
             return liveTab
               ? {
                   ...member,
@@ -2076,12 +2076,24 @@ export default class VerticalTabSidebar {
     memberKey: string,
     selectIfAlreadyOpen: boolean,
   ): Promise<boolean> {
-    const liveTab = this.trackedTabsByMemberKey.get(memberKey) ?? null;
+    const liveTab = this.findTrackedTabByMemberKey(memberKey);
     if (liveTab?.tabId) {
       if (selectIfAlreadyOpen) {
         this.selectTrackedTab(liveTab);
       }
       return true;
+    }
+
+    const pendingOpen = this.pendingMemberOpenPromises.get(memberKey);
+    if (pendingOpen) {
+      const result = await pendingOpen;
+      if (result && selectIfAlreadyOpen) {
+        const pendingLiveTab = this.findTrackedTabByMemberKey(memberKey, true);
+        if (pendingLiveTab?.tabId) {
+          this.selectTrackedTab(pendingLiveTab);
+        }
+      }
+      return result;
     }
 
     const group = this.groupStore.findGroupById(groupId);
@@ -2091,6 +2103,27 @@ export default class VerticalTabSidebar {
       return false;
     }
 
+    const openPromise = this.openGroupMemberAttachment(member, groupId, memberKey);
+    this.pendingMemberOpenPromises.set(memberKey, openPromise);
+    try {
+      const result = await openPromise;
+      if (result && selectIfAlreadyOpen) {
+        const reopenedTab = this.findTrackedTabByMemberKey(memberKey, true);
+        if (reopenedTab?.tabId) {
+          this.selectTrackedTab(reopenedTab);
+        }
+      }
+      return result;
+    } finally {
+      this.pendingMemberOpenPromises.delete(memberKey);
+    }
+  }
+
+  private async openGroupMemberAttachment(
+    member: VirtualGroupMember,
+    groupId: string,
+    memberKey: string,
+  ): Promise<boolean> {
     const preferredItemID = member.itemID ?? member.parentItemID;
     if (preferredItemID == null) {
       return false;
@@ -2109,7 +2142,13 @@ export default class VerticalTabSidebar {
         }
       }
 
+      const alreadyOpenTab = this.findTrackedTabByMemberKey(memberKey, true);
+      if (alreadyOpenTab?.tabId) {
+        return true;
+      }
+
       await (Zotero as any).FileHandlers.open(item);
+      this.tracker.requestReconcile(`group-member-open:${member.key}`, 0);
       this.tracker.scheduleDelayedReconcile(
         `group-member-open:${member.key}`,
         [80, 220, 480],
@@ -3028,5 +3067,18 @@ export default class VerticalTabSidebar {
   private clearDisplayMetadataCache(): void {
     this.displayItemCache.clear();
     this.itemFieldCache.clear();
+  }
+
+  private findTrackedTabByMemberKey(
+    memberKey: string,
+    forceReconcile = false,
+  ): TrackedTab | null {
+    const liveTab = this.trackedTabsByMemberKey.get(memberKey) ?? null;
+    if (liveTab || !forceReconcile) {
+      return liveTab;
+    }
+
+    this.tracker.reconcile(`member-lookup:${memberKey}`);
+    return this.trackedTabsByMemberKey.get(memberKey) ?? null;
   }
 }

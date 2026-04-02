@@ -82,3 +82,20 @@ export function makeVirtualMemberKey(input: {
   const fallbackTitle = input.title?.trim() || "unknown";
   return `fallback:${input.type ?? "tab"}:${fallbackTitle}`;
 }
+
+export function makeVirtualMemberLookupKeys(input: {
+  itemID?: number | null;
+  parentItemID?: number | null;
+  tabId?: string | null;
+  type?: string | null;
+  title?: string | null;
+}): string[] {
+  const keys = new Set<string>([makeVirtualMemberKey(input)]);
+
+  if (typeof input.parentItemID === "number") {
+    keys.add(`parent:${input.parentItemID}:${input.type ?? "tab"}`);
+    keys.add(`item:${input.parentItemID}`);
+  }
+
+  return Array.from(keys);
+}

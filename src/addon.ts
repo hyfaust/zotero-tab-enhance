@@ -21,6 +21,7 @@ class Addon {
       window: Window;
       bound?: boolean;
     };
+    resettingPluginData?: boolean;
     dialog?: DialogHelper;
     tabNotifierID?: string;
   };
