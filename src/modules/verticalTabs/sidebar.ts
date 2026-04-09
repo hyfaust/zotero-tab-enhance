@@ -89,9 +89,10 @@ export default class VerticalTabSidebar {
   private selectedTabKeys: Set<string> = new Set();
   private selectedGroupMemberKeys: Set<string> = new Set();
   private lastSelectedIndex: number = -1;
+  private isResizing: boolean = false;
 
   private readonly handleResizeEnd = () => {
-    if (!this.sidebar || this.collapsed) {
+    if (!this.sidebar || this.collapsed || !this.isResizing) {
       return;
     }
     const width = Math.round(this.sidebar.getBoundingClientRect().width);
@@ -100,6 +101,7 @@ export default class VerticalTabSidebar {
       this.applySidebarWidth();
       this.persistSidebarState();
     }
+    this.isResizing = false;
   };
 
   private readonly handleListDragOver = (event: DragEvent) => {
@@ -584,6 +586,14 @@ export default class VerticalTabSidebar {
       attributes: {
         id: `${config.addonRef}-vertical-tabs-splitter`,
       },
+      listeners: [
+        {
+          type: "mousedown",
+          listener: () => {
+            this.isResizing = true;
+          },
+        },
+      ],
     }) as XULElement;
 
     deckParent.insertBefore(splitter, deck);
@@ -2387,6 +2397,89 @@ export default class VerticalTabSidebar {
     );
   }
 
+  private getTrackedTabByMemberKey(memberKey: string): TrackedTab | null {
+    return this.trackedTabsByMemberKey.get(memberKey) ?? null;
+  }
+
+  private showGroupMemberSelectionMenu(groupId: string): void {
+    const groups = this.groupStore.getGroups();
+    if (groups.length === 0) return;
+
+    // Create a temporary panel for group selection
+    const panel = ztoolkit.createXULElement(this.document, "panel") as unknown as XULPopupElement;
+    panel.setAttribute("id", `${config.addonRef}-group-member-selection-panel`);
+    panel.setAttribute("type", "arrow");
+    panel.setAttribute("flip", "both");
+
+    const panelBody = ztoolkit.UI.createElement(this.document, "div", {
+      namespace: "html",
+      classList: ["tab-enhance-group-selection-panel"],
+    }) as HTMLDivElement;
+
+    groups.forEach((group) => {
+      const button = ztoolkit.UI.createElement(this.document, "button", {
+        namespace: "html",
+        classList: ["tab-enhance-group-selection-button"],
+        properties: {
+          textContent: group.name,
+        },
+        attributes: {
+          style: `color: ${group.color}; border-left: 3px solid ${group.color};`,
+        },
+        listeners: [
+          {
+            type: "click",
+            listener: () => {
+              this.addSelectedGroupMembersToGroup(group.id);
+              panel.hidePopup();
+              panel.remove();
+            },
+          },
+        ],
+      }) as HTMLButtonElement;
+      panelBody.appendChild(button);
+    });
+
+    panel.appendChild(panelBody);
+
+    const popupHost =
+      this.document.getElementById("mainPopupSet") ??
+      this.document.documentElement;
+    popupHost?.appendChild(panel);
+
+    panel.openPopupAtScreen(
+      this.lastContextMenuPoint.x + 8,
+      this.lastContextMenuPoint.y + 8,
+      true,
+    );
+  }
+
+  private addSelectedGroupMembersToGroup(targetGroupId: string): void {
+    const groups = this.groupStore.getGroups();
+    const selectedMembers: Array<{ groupId: string; memberKey: string }> = [];
+
+    this.selectedGroupMemberKeys.forEach(memberKey => {
+      const group = groups.find(g => g.members.some(m => m.key === memberKey));
+      if (group) {
+        selectedMembers.push({ groupId: group.id, memberKey });
+      }
+    });
+
+    if (selectedMembers.length > 0) {
+      // Get member details and add to target group
+      selectedMembers.forEach(({ memberKey }) => {
+        const group = groups.find(g => g.members.some(m => m.key === memberKey));
+        const member = group?.members.find(m => m.key === memberKey);
+        if (member && member.itemID != null) {
+          this.groupStore.addItemsToGroup(targetGroupId, [
+            { itemID: member.itemID, parentItemID: member.parentItemID }
+          ]);
+        }
+      });
+      this.clearMultiSelect();
+    }
+  }
+
 
   private openGroupNamePanel(
     defaultValue: string,
@@ -2679,19 +2772,81 @@ export default class VerticalTabSidebar {
       return;
     }
 
-    const liveTab = this.trackedTabsByMemberKey.get(member.key) ?? null;
-    if (liveTab) {
-      this.commandController
-        .getContextMenuItems(liveTab.tabId)
-        .forEach((item) =>
-          this.contextMenu?.appendChild(this.renderContextMenuItem(item)),
-        );
-      this.appendSeparator();
-    }
+    // Check if there are multi-selected members
+    const hasMultiSelect = this.selectedGroupMemberKeys.size > 0;
 
-    this.appendMenuItem(getString("remove-from-group"), () => {
-      this.groupStore.removeMember(group.id, member.key);
-    });
+    if (hasMultiSelect) {
+      // Multi-select batch operations
+      this.appendMenuItem(
+        getString("add-selected-to-group") + ` (${this.selectedGroupMemberKeys.size})`,
+        () => {
+          const groups = this.groupStore.getGroups();
+          if (groups.length > 0) {
+            this.hideContextMenu();
+            this.showGroupMemberSelectionMenu(groupId);
+          }
+        },
+      );
+
+      this.appendMenuItem(
+        getString("remove-selected-from-group") + ` (${this.selectedGroupMemberKeys.size})`,
+        () => this.removeSelectedFromGroup(),
+      );
+
+      this.appendSeparator();
+      this.appendMenuItem("清除选择", () => this.clearMultiSelect());
+    } else {
+      // Single member operations
+      const liveTab = this.trackedTabsByMemberKey.get(member.key) ?? null;
+      if (liveTab) {
+        this.commandController
+          .getContextMenuItems(liveTab.tabId)
+          .forEach((item) =>
+            this.contextMenu?.appendChild(this.renderContextMenuItem(item)),
+          );
+        this.appendSeparator();
+      }
+
+      // Add to group submenu
+      const groups = this.groupStore.getGroups();
+      if (groups.length > 0) {
+        const trackedTab = this.getTrackedTabByMemberKey(member.key);
+        if (trackedTab) {
+          this.appendGroupSubmenu(
+            getString("add-to-group"),
+            groups.filter(g => g.id !== groupId),
+            (g) => () => this.groupStore.addTabToGroup(g.id, trackedTab),
+          );
+          this.appendSeparator();
+        }
+      }
+
+      // Create new group from this member
+      this.appendMenuItem(getString("create-group"), () => {
+        const trackedTab = this.getTrackedTabByMemberKey(member.key);
+        if (trackedTab) {
+          this.openGroupNamePanel(member.title, (name) => {
+            this.groupStore.createGroupFromTab(trackedTab, name);
+          });
+        } else {
+          // Virtual member - create group with virtual tab
+          this.openGroupNamePanel(member.title, (name) => {
+            const virtualGroup = this.groupStore.createEmptyGroup(name);
+            if (virtualGroup && member.itemID != null) {
+              // Add this member to the new group
+              this.groupStore.addItemsToGroup(virtualGroup.id, [
+                { itemID: member.itemID, parentItemID: member.parentItemID }
+              ]);
+            }
+          });
+        }
+      });
+
+      this.appendSeparator();
+      this.appendMenuItem(getString("remove-from-group"), () => {
+        this.groupStore.removeMember(group.id, member.key);
+      });
+    }
   }
 
   private populateGroupHeaderContextMenu(groupId: string): void {
