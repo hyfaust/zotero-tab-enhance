@@ -165,8 +165,8 @@ export default class TabGroupStore {
           ...group,
           members,
         };
-      })
-      .filter((group) => group.members.length > 0);
+      });
+    // Allow empty groups to exist (don't auto-dissolve)
 
     if (changed) {
       this.emit();
@@ -304,6 +304,21 @@ export default class TabGroupStore {
     this.groups = [...this.groups, group];
     this.emit();
     return { ...group, members: group.members.map((item) => ({ ...item })) };
+  }
+
+  public createEmptyGroup(name?: string): VirtualGroup {
+    const group: VirtualGroup = {
+      id: this.makeID("group"),
+      name: name?.trim() || "新分组",
+      color: this.pickNextColor(),
+      collapsed: false,
+      sortMode: "manual",
+      members: [],
+    };
+
+    this.groups = [...this.groups, group];
+    this.emit();
+    return { ...group, members: [] };
   }
 
   public addTabsToGroup(groupId: string, tabs: TrackedTab[]): void {

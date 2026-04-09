@@ -204,6 +204,32 @@ export default class VerticalTabSidebar {
     this.clearDragState();
   };
 
+  private readonly handleGlobalKeyDown = (event: KeyboardEvent) => {
+    // ESC to clear multi-select
+    if (event.key === "Escape" && (this.selectedTabKeys.size > 0 || this.selectedGroupMemberKeys.size > 0)) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.clearMultiSelect();
+      return;
+    }
+
+    // Ctrl+B to toggle sidebar
+    if ((event.ctrlKey || event.metaKey) && event.key === "b") {
+      const activeElement = this.document.activeElement;
+      const isInInput = activeElement && (
+        activeElement.tagName === "INPUT" ||
+        activeElement.tagName === "TEXTAREA" ||
+        (activeElement as HTMLElement).isContentEditable
+      );
+
+      if (!isInInput) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleCollapsed();
+      }
+    }
+  };
+
   constructor(window: _ZoteroTypes.MainWindow, tracker: TabTrackerService) {
     this.window = window;
     this.document = window.document;
@@ -241,6 +267,7 @@ export default class VerticalTabSidebar {
     });
     this.window.addEventListener("mouseup", this.handleResizeEnd);
     this.window.addEventListener("dragend", this.handleWindowDragEnd, true);
+    this.window.addEventListener("keydown", this.handleGlobalKeyDown, true);
     ztoolkit.log("VerticalTabSidebar initialized");
   }
 
@@ -273,6 +300,7 @@ export default class VerticalTabSidebar {
     this.pendingMemberOpenPromises.clear();
     this.window.removeEventListener("mouseup", this.handleResizeEnd);
     this.window.removeEventListener("dragend", this.handleWindowDragEnd, true);
+    this.window.removeEventListener("keydown", this.handleGlobalKeyDown, true);
 
     this.sidebar?.remove();
     this.splitter?.remove();
@@ -1575,7 +1603,11 @@ export default class VerticalTabSidebar {
     }
 
     // Multi-select visual feedback
-    if (this.selectedTabKeys.has(tab.key)) {
+    if (options.memberKey && this.selectedGroupMemberKeys.has(options.memberKey)) {
+      // Group member (opened tab)
+      row.classList.add("is-multi-selected");
+    } else if (!options.memberKey && this.selectedTabKeys.has(tab.key)) {
+      // Ungrouped tab
       row.classList.add("is-multi-selected");
     }
 
@@ -1651,7 +1683,7 @@ export default class VerticalTabSidebar {
       ),
     );
 
-    // Multi-select visual feedback for group members
+    // Multi-select visual feedback for group members (virtual/unopened tabs)
     if (this.selectedGroupMemberKeys.has(member.key)) {
       row.classList.add("is-multi-selected");
     }
@@ -2077,17 +2109,34 @@ export default class VerticalTabSidebar {
   }
 
   private createGroupFromSelectedTab(): void {
+    // Multi-select mode: create group with all selected tabs
+    if (this.selectedTabKeys.size > 1) {
+      const selectedTabs = this.getSelectedTabs();
+      if (selectedTabs.length > 0) {
+        const name = this.promptForGroupName(`批量分组 (${selectedTabs.length})`);
+        if (name !== null) {
+          this.groupStore.createGroupFromTabs(selectedTabs, name);
+          this.clearMultiSelect();
+        }
+      }
+      return;
+    }
+
+    // Single tab mode or no selection
     const selectedTab = this.tracker.getSelectedTab();
-    if (!selectedTab) {
-      return;
+    if (selectedTab) {
+      const name = this.promptForGroupName(selectedTab.title);
+      if (name === null) {
+        return;
+      }
+      this.groupStore.createGroupFromTab(this.normalizeTab(selectedTab), name);
+    } else {
+      // No open tabs, create empty group
+      const name = this.promptForGroupName("新分组");
+      if (name !== null) {
+        this.groupStore.createEmptyGroup(name);
+      }
     }
-
-    const name = this.promptForGroupName(selectedTab.title);
-    if (name === null) {
-      return;
-    }
-
-    this.groupStore.createGroupFromTab(this.normalizeTab(selectedTab), name);
   }
 
   private collectAllTabsToOneTabGroup(): void {
@@ -2194,16 +2243,22 @@ export default class VerticalTabSidebar {
       const tabKey = element.dataset.tabKey;
       const memberKey = element.dataset.memberKey;
 
-      if (tabKey && this.selectedTabKeys.has(tabKey)) {
-        element.classList.add("is-multi-selected");
-      } else {
-        element.classList.remove("is-multi-select-selected");
+      // Handle ungrouped tabs
+      if (tabKey) {
+        if (this.selectedTabKeys.has(tabKey)) {
+          element.classList.add("is-multi-selected");
+        } else {
+          element.classList.remove("is-multi-selected");
+        }
       }
 
-      if (memberKey && this.selectedGroupMemberKeys.has(memberKey)) {
-        element.classList.add("is-multi-select");
-      } else if (memberKey) {
-        element.classList.remove("is-multi-selected");
+      // Handle group members
+      if (memberKey) {
+        if (this.selectedGroupMemberKeys.has(memberKey)) {
+          element.classList.add("is-multi-selected");
+        } else {
+          element.classList.remove("is-multi-selected");
+        }
       }
     });
 
@@ -2232,20 +2287,10 @@ export default class VerticalTabSidebar {
     if (selectedTabs.length > 0) {
       this.groupStore.addTabsToGroup(groupId, selectedTabs);
       this.clearMultiSelect();
-
-      const notification = new (this.window as any).Zotero.ProgressWindow();
-      notification.changeHeadline(getString("add-selected-to-group"));
-      notification.addDescription(
-        `已添加 ${selectedTabs.length} 个标签页到分组`,
-      );
-      notification.show();
-      notification.startCloseTimer(2000);
     }
   }
 
   private removeSelectedFromGroup(): void {
-    let removedCount = 0;
-
     this.selectedTabKeys.forEach(tabKey => {
       const groups = this.groupStore.getGroups();
       groups.forEach(group => {
@@ -2255,7 +2300,6 @@ export default class VerticalTabSidebar {
         });
         if (member) {
           this.groupStore.removeMember(group.id, member.key);
-          removedCount++;
         }
       });
     });
@@ -2265,21 +2309,12 @@ export default class VerticalTabSidebar {
       groups.forEach(group => {
         if (group.members.some(m => m.key === memberKey)) {
           this.groupStore.removeMember(group.id, memberKey);
-          removedCount++;
         }
       });
     });
 
-    if (removedCount > 0) {
+    if (this.selectedTabKeys.size > 0 || this.selectedGroupMemberKeys.size > 0) {
       this.clearMultiSelect();
-
-      const notification = new (this.window as any).Zotero.ProgressWindow();
-      notification.changeHeadline(getString("remove-selected-from-group"));
-      notification.addDescription(
-        `已从分组中移除 ${removedCount} 个标签页`,
-      );
-      notification.show();
-      notification.startCloseTimer(2000);
     }
   }
 
