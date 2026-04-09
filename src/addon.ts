@@ -4,6 +4,7 @@ import hooks from "./hooks";
 import TabEnhance from "./modules/tabEnhance";
 import VerticalTabSidebar from "./modules/verticalTabs/sidebar";
 import TabTrackerService from "./modules/verticalTabs/tabTracker";
+import LibraryContextMenu from "./modules/libraryContextMenu";
 import { createZToolkit } from "./utils/ztoolkit";
 
 class Addon {
@@ -31,6 +32,7 @@ class Addon {
   public tabEnhanceInstances: Map<Window, TabEnhance>;
   public tabTrackerInstances: Map<Window, TabTrackerService>;
   public verticalTabSidebarInstances: Map<Window, VerticalTabSidebar>;
+  public libraryContextMenuInstances: Map<Window, LibraryContextMenu>;
 
   constructor() {
     this.data = {
@@ -45,6 +47,7 @@ class Addon {
     this.tabEnhanceInstances = new Map();
     this.tabTrackerInstances = new Map();
     this.verticalTabSidebarInstances = new Map();
+    this.libraryContextMenuInstances = new Map();
   }
 }
 

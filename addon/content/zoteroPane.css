@@ -75,6 +75,32 @@
   background: color-mix(in srgb, #f6b433 18%, white);
 }
 
+.tab-enhance-vertical-tabs-collect-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, #5c8df6 12%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  overflow: hidden;
+  transition: background 200ms ease, transform 150ms ease;
+}
+
+.tab-enhance-vertical-tabs-collect-all:hover {
+  background: color-mix(in srgb, #5c8df6 25%, white);
+  transform: scale(1.05);
+}
+
+.tab-enhance-vertical-tabs-collect-all:active {
+  transform: scale(0.95);
+}
+
 .tab-enhance-vertical-tabs-search {
   margin: 8px 8px 4px;
   padding: 7px 10px;
@@ -643,7 +669,61 @@
   border-color: color-mix(in srgb, #4f8df6 55%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, #4f8df6 18%, transparent);
 }
-.tab-enhance-vertical-tabs-splitter {
+
+/* Multi-select styles */
+.is-multi-selected {
+  background: linear-gradient(90deg, 
+    color-mix(in srgb, #5c8df6 20%, transparent) 0%, 
+    color-mix(in srgb, #5c8df6 10%, transparent) 100%) !important;
+  border-left: 3px solid #5c8df6;
+  padding-left: 5px;
+}
+
+.is-multi-selected:hover {
+  background: linear-gradient(90deg, 
+    color-mix(in srgb, #5c8df6 30%, transparent) 0%, 
+    color-mix(in srgb, #5c8df6 15%, transparent) 100%) !important;
+}
+
+.tab-enhance-vertical-tabs-count.is-multi-select {
+  background: color-mix(in srgb, #5c8df6 25%, white);
+  font-weight: bold;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* Group selection panel */
+.tab-enhance-group-selection-panel {
+  padding: 6px;
+  background: color-mix(in srgb, white 96%, currentColor 4%);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.tab-enhance-group-selection-button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  margin: 4px 0;
+  border: none;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  transition: background 150ms ease;
+}
+
+.tab-enhance-group-selection-button:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-group-members {
   min-width: 4px;
   border-right: 1px solid transparent;
 }

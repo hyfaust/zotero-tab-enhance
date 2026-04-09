@@ -3,6 +3,7 @@ import { initPreference, registerPrefsScripts } from "./modules/preferenceScript
 import TabEnhance from "./modules/tabEnhance";
 import VerticalTabSidebar from "./modules/verticalTabs/sidebar";
 import TabTrackerService from "./modules/verticalTabs/tabTracker";
+import LibraryContextMenu from "./modules/libraryContextMenu";
 import { initLocale } from "./utils/locale";
 import { getPref, resetPluginPrefsToDefaults } from "./utils/prefs";
 import { createZToolkit } from "./utils/ztoolkit";
@@ -45,9 +46,27 @@ function syncWindowFeatures(win: _ZoteroTypes.MainWindow): void {
         verticalTabSidebar.init();
         addon.verticalTabSidebarInstances.set(win, verticalTabSidebar);
         ztoolkit.log("VerticalTabSidebar instance created for window");
+
+        // Initialize library context menu
+        if (!addon.libraryContextMenuInstances.has(win)) {
+          const libraryContextMenu = new LibraryContextMenu(
+            win,
+            verticalTabSidebar["groupStore"],
+          );
+          libraryContextMenu.init();
+          addon.libraryContextMenuInstances.set(win, libraryContextMenu);
+          ztoolkit.log("LibraryContextMenu instance created for window");
+        }
       }
     }
   } else {
+    const libraryContextMenu = addon.libraryContextMenuInstances.get(win);
+    if (libraryContextMenu) {
+      libraryContextMenu.destroy();
+      addon.libraryContextMenuInstances.delete(win);
+      ztoolkit.log("LibraryContextMenu instance destroyed for window");
+    }
+
     const verticalTabSidebar = addon.verticalTabSidebarInstances.get(win);
     if (verticalTabSidebar) {
       verticalTabSidebar.destroy();
@@ -128,6 +147,13 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
+  const libraryContextMenu = addon.libraryContextMenuInstances.get(win);
+  if (libraryContextMenu) {
+    libraryContextMenu.destroy();
+    addon.libraryContextMenuInstances.delete(win);
+    ztoolkit.log("LibraryContextMenu instance destroyed for window");
+  }
+
   const verticalTabSidebar = addon.verticalTabSidebarInstances.get(win);
   if (verticalTabSidebar) {
     verticalTabSidebar.destroy();
@@ -155,6 +181,11 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
 function onShutdown(): void {
   unregisterTabNotifier();
+
+  addon.libraryContextMenuInstances.forEach((libraryContextMenu) => {
+    libraryContextMenu.destroy();
+  });
+  addon.libraryContextMenuInstances.clear();
 
   addon.verticalTabSidebarInstances.forEach((verticalTabSidebar) => {
     verticalTabSidebar.destroy();

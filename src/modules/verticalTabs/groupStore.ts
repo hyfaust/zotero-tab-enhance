@@ -282,6 +282,124 @@ export default class TabGroupStore {
     this.emit();
   }
 
+  public createGroupFromTabs(
+    tabs: TrackedTab[],
+    name?: string,
+  ): VirtualGroup | null {
+    if (!tabs || tabs.length === 0) {
+      return null;
+    }
+
+    const members = tabs.map((tab) => this.makeMemberFromTab(tab));
+
+    const group: VirtualGroup = {
+      id: this.makeID("group"),
+      name: name?.trim() || this.buildDefaultGroupNamesFromTabs(tabs),
+      color: this.pickNextColor(),
+      collapsed: false,
+      sortMode: "manual",
+      members,
+    };
+
+    this.groups = [...this.groups, group];
+    this.emit();
+    return { ...group, members: group.members.map((item) => ({ ...item })) };
+  }
+
+  public addTabsToGroup(groupId: string, tabs: TrackedTab[]): void {
+    if (!tabs || tabs.length === 0) {
+      return;
+    }
+
+    let changed = false;
+    this.groups = this.groups.map((group) => {
+      if (group.id !== groupId) {
+        return group;
+      }
+
+      const existingKeys = new Set(group.members.map((m) => m.key));
+      const newMembers = tabs
+        .filter((tab) => {
+          const memberKey = this.makeMemberKeyFromTab(tab);
+          return !existingKeys.has(memberKey);
+        })
+        .map((tab) => this.makeMemberFromTab(tab));
+
+      if (newMembers.length === 0) {
+        return group;
+      }
+
+      changed = true;
+      return {
+        ...group,
+        members: [...group.members, ...newMembers],
+      };
+    });
+
+    if (changed) {
+      this.emit();
+    }
+  }
+
+  public addItemsToGroup(
+    groupId: string,
+    items: Array<{ itemID: number; parentItemID: number | null }>,
+  ): void {
+    if (!items || items.length === 0) {
+      return;
+    }
+
+    let changed = false;
+    this.groups = this.groups.map((group) => {
+      if (group.id !== groupId) {
+        return group;
+      }
+
+      const existingKeys = new Set(group.members.map((m) => m.key));
+      const newMembers: VirtualGroupMember[] = [];
+
+      items.forEach(({ itemID, parentItemID }) => {
+        const item = Zotero.Items.get(itemID);
+        if (!item) return;
+
+        const memberKey = `item:${itemID}`;
+        if (existingKeys.has(memberKey)) return;
+
+        const topLevelItem = parentItemID
+          ? Zotero.Items.get(parentItemID)
+          : item.topLevelItem || item;
+
+        newMembers.push({
+          id: this.makeID("member"),
+          key: memberKey,
+          sourceTabKey: null,
+          tabId: null,
+          type: "reader",
+          title: item.getDisplayTitle() || topLevelItem?.getDisplayTitle() || "Unknown",
+          itemID: item.isFileAttachment() ? itemID : null,
+          parentItemID: parentItemID || topLevelItem?.id || itemID,
+          isOpen: false,
+          openedAt: null,
+          iconKey: "reader",
+        });
+      });
+
+      if (newMembers.length === 0) {
+        return group;
+      }
+
+      changed = true;
+      return {
+        ...group,
+        members: [...group.members, ...newMembers],
+      };
+    });
+
+    if (changed) {
+      this.emit();
+    }
+  }
+
   public renameGroup(groupId: string, name: string): void {
     const normalizedName = name.trim();
     if (!normalizedName) {
@@ -396,6 +514,22 @@ export default class TabGroupStore {
       return `Group ${tab.itemID}`;
     }
     return tab.title.slice(0, 32) || "New Group";
+  }
+
+  private buildDefaultGroupNamesFromTabs(tabs: TrackedTab[]): string {
+    if (tabs.length === 1) {
+      return this.buildDefaultGroupName(tabs[0]);
+    }
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    const hours = String(now.getHours()).padStart(2, "0");
+    const minutes = String(now.getMinutes()).padStart(2, "0");
+    const seconds = String(now.getSeconds()).padStart(2, "0");
+
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
 
   private makeMemberFromTab(

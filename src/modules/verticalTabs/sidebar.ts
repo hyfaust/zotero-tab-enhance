@@ -54,6 +54,7 @@ export default class VerticalTabSidebar {
   private splitter?: XULElement;
   private toggleButton?: XULElement;
   private createGroupButton?: HTMLButtonElement;
+  private collectAllButton?: HTMLButtonElement;
   private viewSwitcher?: HTMLElement;
   private headerTitle?: HTMLElement;
   private countBadge?: HTMLElement;
@@ -83,6 +84,11 @@ export default class VerticalTabSidebar {
   private groupNamePanelConfirmed = false;
   private readonly displayItemCache = new Map<string, any | null>();
   private readonly itemFieldCache = new Map<string, string>();
+
+  // Multi-select state
+  private selectedTabKeys: Set<string> = new Set();
+  private selectedGroupMemberKeys: Set<string> = new Set();
+  private lastSelectedIndex: number = -1;
 
   private readonly handleResizeEnd = () => {
     if (!this.sidebar || this.collapsed) {
@@ -277,6 +283,7 @@ export default class VerticalTabSidebar {
     this.splitter = undefined;
     this.toggleButton = undefined;
     this.createGroupButton = undefined;
+    this.collectAllButton = undefined;
     this.viewSwitcher = undefined;
     this.headerTitle = undefined;
     this.countBadge = undefined;
@@ -366,6 +373,29 @@ export default class VerticalTabSidebar {
               event.preventDefault();
               event.stopPropagation();
               this.createGroupFromSelectedTab();
+            },
+          },
+        ],
+      },
+    ) as HTMLButtonElement;
+
+    const collectAllButton = ztoolkit.UI.createElement(
+      this.document,
+      "button",
+      {
+        namespace: "html",
+        classList: ["tab-enhance-vertical-tabs-collect-all"],
+        properties: {
+          textContent: "📋",
+          title: getString("one-tab-collect"),
+        },
+        listeners: [
+          {
+            type: "click",
+            listener: (event: Event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              this.collectAllTabsToOneTabGroup();
             },
           },
         ],
@@ -509,6 +539,7 @@ export default class VerticalTabSidebar {
     header.appendChild(headerText);
     header.appendChild(countBadge);
     header.appendChild(createGroupButton);
+    header.appendChild(collectAllButton);
     sidebar.appendChild(header);
     sidebar.appendChild(searchInput);
     sidebar.appendChild(viewSwitcher);
@@ -534,6 +565,7 @@ export default class VerticalTabSidebar {
     this.splitter = splitter;
     this.toggleButton = toggleButton;
     this.createGroupButton = createGroupButton;
+    this.collectAllButton = collectAllButton;
     this.viewSwitcher = viewSwitcher;
     this.headerTitle = headerText;
     this.countBadge = countBadge;
@@ -1542,6 +1574,11 @@ export default class VerticalTabSidebar {
       row.classList.add("is-dragging");
     }
 
+    // Multi-select visual feedback
+    if (this.selectedTabKeys.has(tab.key)) {
+      row.classList.add("is-multi-selected");
+    }
+
     row.appendChild(this.renderBadge(tab.iconKey));
     row.appendChild(
       this.renderRowContent(
@@ -1614,6 +1651,11 @@ export default class VerticalTabSidebar {
       ),
     );
 
+    // Multi-select visual feedback for group members
+    if (this.selectedGroupMemberKeys.has(member.key)) {
+      row.classList.add("is-multi-selected");
+    }
+
     return row;
   }
 
@@ -1685,7 +1727,19 @@ export default class VerticalTabSidebar {
     }
     event.preventDefault();
     event.stopPropagation();
-    this.selectTrackedTabByKey(row.dataset.tabKey ?? null);
+
+    const tabKey = row.dataset.tabKey ?? null;
+    if (!tabKey) return;
+
+    // Try multi-select toggle first
+    const consumed = this.toggleMultiSelect(tabKey, event);
+    if (consumed) {
+      // Multi-select mode: don't open tab
+      return;
+    }
+
+    // Regular click: open tab
+    this.selectTrackedTabByKey(tabKey);
   };
 
   private readonly handleRowKeyDown = (event: KeyboardEvent) => {
@@ -1745,6 +1799,15 @@ export default class VerticalTabSidebar {
 
     event.preventDefault();
     event.stopPropagation();
+
+    // Try multi-select toggle first
+    const consumed = this.toggleGroupMemberMultiSelect(memberKey, event);
+    if (consumed) {
+      // Multi-select mode: don't open member
+      return;
+    }
+
+    // Regular click: open member
     void this.activateGroupMember(groupId, memberKey);
   };
 
@@ -2027,6 +2090,268 @@ export default class VerticalTabSidebar {
     this.groupStore.createGroupFromTab(this.normalizeTab(selectedTab), name);
   }
 
+  private collectAllTabsToOneTabGroup(): void {
+    const openTabs = this.tracker
+      .getTabs()
+      .map((tab) => this.normalizeTab(tab))
+      .filter((tab) => this.shouldRenderTab(tab));
+
+    if (openTabs.length === 0) {
+      return;
+    }
+
+    const group = this.groupStore.createGroupFromTabs(openTabs);
+    if (!group) {
+      return;
+    }
+
+    const notification = new (this.window as any).Zotero.ProgressWindow();
+    notification.changeHeadline(getString("one-tab-collect"));
+    notification.addDescription(
+      getString("tabs-collected", { args: { count: openTabs.length } }),
+    );
+    notification.show();
+    notification.startCloseTimer(3000);
+  }
+
+  // ==================== Multi-select Methods ====================
+
+  private toggleMultiSelect(tabKey: string, event: MouseEvent): boolean {
+    if (!tabKey) return false;
+
+    const visibleTabs = this.getVisibleSortableTabs(this.tracker.getSnapshot());
+    const currentIndex = visibleTabs.findIndex(tab => tab.key === tabKey);
+
+    if (event.shiftKey && this.lastSelectedIndex >= 0) {
+      // Shift+Click: Range selection
+      this.selectRange(tabKey, visibleTabs);
+    } else if (event.ctrlKey || event.metaKey) {
+      // Ctrl/Cmd+Click: Toggle single selection
+      if (this.selectedTabKeys.has(tabKey)) {
+        this.selectedTabKeys.delete(tabKey);
+      } else {
+        this.selectedTabKeys.add(tabKey);
+      }
+      this.lastSelectedIndex = currentIndex;
+    } else {
+      // Regular click: If there are selections, keep them; otherwise, open tab
+      if (this.selectedTabKeys.size > 0) {
+        return true; // Consume the click, don't open tab
+      }
+      return false; // Let original handler open the tab
+    }
+
+    this.updateMultiSelectUI();
+    return true;
+  }
+
+  private selectRange(tabKey: string, visibleTabs: TrackedTab[]): void {
+    const currentIndex = visibleTabs.findIndex(tab => tab.key === tabKey);
+    if (currentIndex < 0 || this.lastSelectedIndex < 0) return;
+
+    const start = Math.min(this.lastSelectedIndex, currentIndex);
+    const end = Math.max(this.lastSelectedIndex, currentIndex);
+
+    for (let i = start; i <= end; i++) {
+      this.selectedTabKeys.add(visibleTabs[i].key);
+    }
+    this.lastSelectedIndex = currentIndex;
+  }
+
+  private toggleGroupMemberMultiSelect(memberKey: string, event: MouseEvent): boolean {
+    if (!memberKey) return false;
+
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      if (this.selectedGroupMemberKeys.has(memberKey)) {
+        this.selectedGroupMemberKeys.delete(memberKey);
+      } else {
+        this.selectedGroupMemberKeys.add(memberKey);
+      }
+      this.updateMultiSelectUI();
+      return true;
+    }
+
+    if (this.selectedGroupMemberKeys.size > 0) {
+      return true;
+    }
+    return false;
+  }
+
+  private clearMultiSelect(): void {
+    this.selectedTabKeys.clear();
+    this.selectedGroupMemberKeys.clear();
+    this.lastSelectedIndex = -1;
+    this.updateMultiSelectUI();
+  }
+
+  private updateMultiSelectUI(): void {
+    // Update visual state of all rows
+    const allRows = this.listContainer?.querySelectorAll(".tab-enhance-vertical-tab-row");
+    if (!allRows) return;
+
+    allRows.forEach((row: Element) => {
+      const element = row as HTMLDivElement;
+      const tabKey = element.dataset.tabKey;
+      const memberKey = element.dataset.memberKey;
+
+      if (tabKey && this.selectedTabKeys.has(tabKey)) {
+        element.classList.add("is-multi-selected");
+      } else {
+        element.classList.remove("is-multi-select-selected");
+      }
+
+      if (memberKey && this.selectedGroupMemberKeys.has(memberKey)) {
+        element.classList.add("is-multi-select");
+      } else if (memberKey) {
+        element.classList.remove("is-multi-selected");
+      }
+    });
+
+    // Update count badge if in multi-select mode
+    if (this.countBadge) {
+      const totalCount = this.selectedTabKeys.size + this.selectedGroupMemberKeys.size;
+      if (totalCount > 0) {
+        this.countBadge.textContent = `${totalCount}✓`;
+        this.countBadge.classList.add("is-multi-select");
+      } else {
+        const openTabs = this.tracker.getSnapshot().tabs.filter(tab => this.shouldRenderTab(tab));
+        this.countBadge.textContent = String(openTabs.length);
+        this.countBadge.classList.remove("is-multi-select");
+      }
+    }
+  }
+
+  private getSelectedTabs(): TrackedTab[] {
+    return Array.from(this.selectedTabKeys)
+      .map(key => this.trackedTabsByKey.get(key))
+      .filter((tab): tab is TrackedTab => tab != null);
+  }
+
+  private addSelectedToGroup(groupId: string): void {
+    const selectedTabs = this.getSelectedTabs();
+    if (selectedTabs.length > 0) {
+      this.groupStore.addTabsToGroup(groupId, selectedTabs);
+      this.clearMultiSelect();
+
+      const notification = new (this.window as any).Zotero.ProgressWindow();
+      notification.changeHeadline(getString("add-selected-to-group"));
+      notification.addDescription(
+        `已添加 ${selectedTabs.length} 个标签页到分组`,
+      );
+      notification.show();
+      notification.startCloseTimer(2000);
+    }
+  }
+
+  private removeSelectedFromGroup(): void {
+    let removedCount = 0;
+
+    this.selectedTabKeys.forEach(tabKey => {
+      const groups = this.groupStore.getGroups();
+      groups.forEach(group => {
+        const member = group.members.find(m => {
+          const tab = this.trackedTabsByKey.get(tabKey);
+          return tab && this.groupStore.makeMemberKeyFromTab(tab) === m.key;
+        });
+        if (member) {
+          this.groupStore.removeMember(group.id, member.key);
+          removedCount++;
+        }
+      });
+    });
+
+    this.selectedGroupMemberKeys.forEach(memberKey => {
+      const groups = this.groupStore.getGroups();
+      groups.forEach(group => {
+        if (group.members.some(m => m.key === memberKey)) {
+          this.groupStore.removeMember(group.id, memberKey);
+          removedCount++;
+        }
+      });
+    });
+
+    if (removedCount > 0) {
+      this.clearMultiSelect();
+
+      const notification = new (this.window as any).Zotero.ProgressWindow();
+      notification.changeHeadline(getString("remove-selected-from-group"));
+      notification.addDescription(
+        `已从分组中移除 ${removedCount} 个标签页`,
+      );
+      notification.show();
+      notification.startCloseTimer(2000);
+    }
+  }
+
+  private closeSelectedTabs(): void {
+    const selectedTabs = this.getSelectedTabs();
+    const tabsToClose = selectedTabs.filter(tab => tab.tabId);
+
+    tabsToClose.forEach(tab => {
+      if (tab.tabId) {
+        this.commandController.close(tab.tabId);
+      }
+    });
+
+    if (tabsToClose.length > 0) {
+      this.clearMultiSelect();
+      this.tracker.reconcile("multi-select-close");
+    }
+  }
+
+  private showGroupSelectionMenu(tabs: TrackedTab[]): void {
+    const groups = this.groupStore.getGroups();
+    if (groups.length === 0) return;
+
+    // Create a temporary panel for group selection
+    const panel = ztoolkit.createXULElement(this.document, "panel") as unknown as XULPopupElement;
+    panel.setAttribute("id", `${config.addonRef}-group-selection-panel`);
+    panel.setAttribute("type", "arrow");
+    panel.setAttribute("flip", "both");
+
+    const panelBody = ztoolkit.UI.createElement(this.document, "div", {
+      namespace: "html",
+      classList: ["tab-enhance-group-selection-panel"],
+    }) as HTMLDivElement;
+
+    groups.forEach((group) => {
+      const button = ztoolkit.UI.createElement(this.document, "button", {
+        namespace: "html",
+        classList: ["tab-enhance-group-selection-button"],
+        properties: {
+          textContent: group.name,
+        },
+        attributes: {
+          style: `color: ${group.color}; border-left: 3px solid ${group.color};`,
+        },
+        listeners: [
+          {
+            type: "click",
+            listener: () => {
+              this.addSelectedToGroup(group.id);
+              panel.hidePopup();
+              panel.remove();
+            },
+          },
+        ],
+      }) as HTMLButtonElement;
+      panelBody.appendChild(button);
+    });
+
+    panel.appendChild(panelBody);
+
+    const popupHost =
+      this.document.getElementById("mainPopupSet") ??
+      this.document.documentElement;
+    popupHost?.appendChild(panel);
+
+    panel.openPopupAtScreen(
+      this.lastContextMenuPoint.x + 8,
+      this.lastContextMenuPoint.y + 8,
+      true,
+    );
+  }
+
 
   private openGroupNamePanel(
     defaultValue: string,
@@ -2252,19 +2577,59 @@ export default class VerticalTabSidebar {
       );
 
     this.appendSeparator();
-    this.appendMenuItem(getString("create-group"), () => {
-      this.openGroupNamePanel(tracked.title, (name) => {
-        this.groupStore.createGroupFromTab(tracked, name);
-      });
-    });
 
-    const groups = this.groupStore.getGroups();
-    if (groups.length > 0) {
-      this.appendGroupSubmenu(
-        getString("add-to-group"),
-        groups,
-        (group) => () => this.groupStore.addTabToGroup(group.id, tracked),
+    // Multi-select batch operations
+    const hasMultiSelect = this.selectedTabKeys.size > 0;
+    if (hasMultiSelect) {
+      this.appendMenuItem(
+        getString("add-selected-to-group") + ` (${this.selectedTabKeys.size})`,
+        () => {
+          const groups = this.groupStore.getGroups();
+          if (groups.length > 0) {
+            // Show submenu for group selection
+            this.hideContextMenu();
+            this.showGroupSelectionMenu(this.getSelectedTabs());
+          } else {
+            this.addSelectedToGroup("");
+          }
+        },
       );
+
+      this.appendMenuItem(
+        getString("remove-selected-from-group") + ` (${this.selectedTabKeys.size})`,
+        () => this.removeSelectedFromGroup(),
+      );
+
+      this.appendMenuItem(
+        getString("close-selected-tabs") + ` (${this.selectedTabKeys.size})`,
+        () => this.closeSelectedTabs(),
+      );
+
+      this.appendMenuItem(getString("create-group"), () => {
+        this.clearMultiSelect();
+        this.openGroupNamePanel(tracked.title, (name) => {
+          this.groupStore.createGroupFromTab(tracked, name);
+        });
+      });
+
+      this.appendSeparator();
+      this.appendMenuItem("清除选择", () => this.clearMultiSelect());
+    } else {
+      // Single tab operations
+      this.appendMenuItem(getString("create-group"), () => {
+        this.openGroupNamePanel(tracked.title, (name) => {
+          this.groupStore.createGroupFromTab(tracked, name);
+        });
+      });
+
+      const groups = this.groupStore.getGroups();
+      if (groups.length > 0) {
+        this.appendGroupSubmenu(
+          getString("add-to-group"),
+          groups,
+          (group) => () => this.groupStore.addTabToGroup(group.id, tracked),
+        );
+      }
     }
   }
 
