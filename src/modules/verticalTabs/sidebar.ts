@@ -89,6 +89,7 @@ export default class VerticalTabSidebar {
   private selectedTabKeys: Set<string> = new Set();
   private selectedGroupMemberKeys: Set<string> = new Set();
   private lastSelectedIndex: number = -1;
+  private lastSelectedGroupId: string | null = null;
   private isResizing: boolean = false;
 
   private readonly handleResizeEnd = () => {
@@ -212,6 +213,14 @@ export default class VerticalTabSidebar {
       event.preventDefault();
       event.stopPropagation();
       this.clearMultiSelect();
+      return;
+    }
+
+    // Delete/Backspace to remove selected from group
+    if ((event.key === "Delete" || event.key === "Backspace") && this.selectedGroupMemberKeys.size > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.removeSelectedFromGroup();
       return;
     }
 
@@ -1167,6 +1176,13 @@ export default class VerticalTabSidebar {
           listener: (event: Event) => {
             event.preventDefault();
             event.stopPropagation();
+            
+            // Ctrl+Click: Select all members in this group
+            if ((event as MouseEvent).ctrlKey || (event as MouseEvent).metaKey) {
+              this.selectAllMembersInGroup(renderable.group.id);
+              return;
+            }
+            
             this.requestGroupCollapsedToggle(
               renderable.group.id,
               renderable.group.collapsed,
@@ -1774,7 +1790,8 @@ export default class VerticalTabSidebar {
     if (!tabKey) return;
 
     // Try multi-select toggle first
-    const consumed = this.toggleMultiSelect(tabKey, event);
+    const groupId = row.dataset.groupId ?? null;
+    const consumed = this.toggleMultiSelect(tabKey, event, groupId);
     if (consumed) {
       // Multi-select mode: don't open tab
       return;
@@ -2164,6 +2181,13 @@ export default class VerticalTabSidebar {
       return;
     }
 
+    // Close all collected tabs
+    openTabs.forEach(tab => {
+      if (tab.tabId) {
+        this.commandController.close(tab.tabId);
+      }
+    });
+
     const notification = new (this.window as any).Zotero.ProgressWindow();
     notification.changeHeadline(getString("one-tab-collect"));
     notification.addDescription(
@@ -2175,15 +2199,15 @@ export default class VerticalTabSidebar {
 
   // ==================== Multi-select Methods ====================
 
-  private toggleMultiSelect(tabKey: string, event: MouseEvent): boolean {
+  private toggleMultiSelect(tabKey: string, event: MouseEvent, groupId?: string | null): boolean {
     if (!tabKey) return false;
 
     const visibleTabs = this.getVisibleSortableTabs(this.tracker.getSnapshot());
     const currentIndex = visibleTabs.findIndex(tab => tab.key === tabKey);
 
-    if (event.shiftKey && this.lastSelectedIndex >= 0) {
-      // Shift+Click: Range selection
-      this.selectRange(tabKey, visibleTabs);
+    if (event.shiftKey && this.lastSelectedIndex >= 0 && this.lastSelectedGroupId === groupId) {
+      // Shift+Click: Range selection (only within same group)
+      this.selectRange(tabKey, visibleTabs, groupId);
     } else if (event.ctrlKey || event.metaKey) {
       // Ctrl/Cmd+Click: Toggle single selection
       if (this.selectedTabKeys.has(tabKey)) {
@@ -2192,6 +2216,7 @@ export default class VerticalTabSidebar {
         this.selectedTabKeys.add(tabKey);
       }
       this.lastSelectedIndex = currentIndex;
+      this.lastSelectedGroupId = groupId || null;
     } else {
       // Regular click: If there are selections, keep them; otherwise, open tab
       if (this.selectedTabKeys.size > 0) {
@@ -2204,17 +2229,34 @@ export default class VerticalTabSidebar {
     return true;
   }
 
-  private selectRange(tabKey: string, visibleTabs: TrackedTab[]): void {
+  private selectRange(tabKey: string, visibleTabs: TrackedTab[], groupId?: string | null): void {
     const currentIndex = visibleTabs.findIndex(tab => tab.key === tabKey);
     if (currentIndex < 0 || this.lastSelectedIndex < 0) return;
 
+    // Only select tabs within the same group
     const start = Math.min(this.lastSelectedIndex, currentIndex);
     const end = Math.max(this.lastSelectedIndex, currentIndex);
 
     for (let i = start; i <= end; i++) {
-      this.selectedTabKeys.add(visibleTabs[i].key);
+      const tab = visibleTabs[i];
+      // Only add if it's in the same group (or both are ungrouped)
+      const tabGroupId = this.getGroupIdForKey(tab.key);
+      if (tabGroupId === groupId) {
+        this.selectedTabKeys.add(tab.key);
+      }
     }
     this.lastSelectedIndex = currentIndex;
+    this.lastSelectedGroupId = groupId || null;
+  }
+
+  private getGroupIdForKey(tabKey: string): string | null {
+    const groups = this.groupStore.getGroups();
+    for (const group of groups) {
+      if (group.members.some(m => m.key === tabKey || this.groupStore.makeMemberKeyFromTab(this.trackedTabsByKey.get(tabKey)!) === m.key)) {
+        return group.id;
+      }
+    }
+    return null;
   }
 
   private toggleGroupMemberMultiSelect(memberKey: string, event: MouseEvent): boolean {
@@ -2240,6 +2282,18 @@ export default class VerticalTabSidebar {
     this.selectedTabKeys.clear();
     this.selectedGroupMemberKeys.clear();
     this.lastSelectedIndex = -1;
+    this.lastSelectedGroupId = null;
+    this.updateMultiSelectUI();
+  }
+
+  private selectAllMembersInGroup(groupId: string): void {
+    const group = this.groupStore.findGroupById(groupId);
+    if (!group) return;
+
+    group.members.forEach(member => {
+      this.selectedGroupMemberKeys.add(member.key);
+    });
+    this.lastSelectedGroupId = groupId;
     this.updateMultiSelectUI();
   }
 
@@ -2395,6 +2449,15 @@ export default class VerticalTabSidebar {
       this.lastContextMenuPoint.y + 8,
       true,
     );
+  }
+
+  private addMemberToGroup(groupId: string, member: VirtualGroupMember): void {
+    // Add virtual member to another group using itemID
+    if (member.itemID != null) {
+      this.groupStore.addItemsToGroup(groupId, [
+        { itemID: member.itemID, parentItemID: member.parentItemID }
+      ]);
+    }
   }
 
   private getTrackedTabByMemberKey(memberKey: string): TrackedTab | null {
@@ -2756,6 +2819,12 @@ export default class VerticalTabSidebar {
           getString("add-to-group"),
           groups,
           (group) => () => this.groupStore.addTabToGroup(group.id, tracked),
+          () => {
+            this.hideContextMenu();
+            this.openGroupNamePanel(tracked.title, (name) => {
+              this.groupStore.createGroupFromTab(tracked, name);
+            });
+          },
         );
       }
     }
@@ -2807,15 +2876,26 @@ export default class VerticalTabSidebar {
         this.appendSeparator();
       }
 
-      // Add to group submenu
+      // Add to group submenu (for both opened and unopened tabs)
       const groups = this.groupStore.getGroups();
       if (groups.length > 0) {
-        const trackedTab = this.getTrackedTabByMemberKey(member.key);
-        if (trackedTab) {
+        const otherGroups = groups.filter(g => g.id !== groupId);
+        if (otherGroups.length > 0) {
           this.appendGroupSubmenu(
             getString("add-to-group"),
-            groups.filter(g => g.id !== groupId),
-            (g) => () => this.groupStore.addTabToGroup(g.id, trackedTab),
+            otherGroups,
+            (g) => () => this.addMemberToGroup(g.id, member),
+            () => {
+              this.hideContextMenu();
+              this.openGroupNamePanel(member.title, (name) => {
+                const virtualGroup = this.groupStore.createEmptyGroup(name);
+                if (virtualGroup && member.itemID != null) {
+                  this.groupStore.addItemsToGroup(virtualGroup.id, [
+                    { itemID: member.itemID, parentItemID: member.parentItemID }
+                  ]);
+                }
+              });
+            },
           );
           this.appendSeparator();
         }
@@ -2919,8 +2999,9 @@ export default class VerticalTabSidebar {
     label: string,
     groups: VirtualGroup[],
     handlerFactory: (group: VirtualGroup) => () => void,
+    onCreateNew?: () => void,
   ): void {
-    if (!this.contextMenu || groups.length === 0) {
+    if (!this.contextMenu) {
       return;
     }
 
@@ -2938,6 +3019,16 @@ export default class VerticalTabSidebar {
         ),
       );
     });
+
+    // Add "+" button at the bottom for creating new group
+    if (onCreateNew) {
+      popup.appendChild(
+        ztoolkit.createXULElement(this.document, "menuseparator"),
+      );
+      const createItem = this.createMenuItem("+ 新建分组", onCreateNew);
+      createItem.setAttribute("style", "font-weight: bold;");
+      popup.appendChild(createItem);
+    }
 
     menu.appendChild(popup);
     this.contextMenu.appendChild(menu);
