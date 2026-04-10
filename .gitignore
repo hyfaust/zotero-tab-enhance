@@ -155,16 +155,6 @@ tsconfig.tsbuildinfo
 build
 logs
 
-# Documentation (keep only README, exclude other docs)
-ARCHITECTURE_AND_PLAN.md
-IMPLEMENTATION_SUMMARY.md
-LIBRARY_CONTEXT_MENU_FIX.md
-MULTISELECT_IMPLEMENTATION_PLAN.md
-MULTISELECT_USER_GUIDE.md
-*.md
-!readme.md
-!README.md
-
 # Build artifacts
 *.xpi
 *.zip

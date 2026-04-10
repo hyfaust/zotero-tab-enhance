@@ -522,8 +522,27 @@
   transform: translateY(-2px);
   pointer-events: none;
 }
+
+.tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-tabs-collect-all {
+  width: 0;
+  max-height: 0;
+  margin: 0;
+  padding: 0;
+  border-width: 0;
+  opacity: 0;
+  transform: translateY(-2px);
+  pointer-events: none;
+}
+
 .tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-tabs-list {
   padding: 8px 4px 10px 4px;
+  overflow: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-tabs-list::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
 }
 
 .tab-enhance-vertical-tabs-sidebar.is-collapsed .tab-enhance-vertical-tab-row {

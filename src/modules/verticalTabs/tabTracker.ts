@@ -169,20 +169,23 @@ export default class TabTrackerService {
     reason: string,
     delays: number[] = [60, 180, 420],
   ): void {
+    // Clear all existing delayed timers to debounce
     this.delayedReconcileTimers.forEach((timerId) =>
       this.window.clearTimeout(timerId),
     );
     this.delayedReconcileTimers.clear();
-    delays.forEach((delay) => {
-      const timerId = this.window.setTimeout(() => {
-        this.delayedReconcileTimers.delete(timerId);
-        if (!this.initialized) {
-          return;
-        }
-        this.reconcile(`${reason}:delayed-${delay}`);
-      }, delay);
-      this.delayedReconcileTimers.add(timerId);
-    });
+
+    // Schedule a single delayed reconcile with the longest delay
+    // This acts as a debounce: only the last call within the delay window will execute
+    const debounceDelay = Math.max(...delays);
+    const timerId = this.window.setTimeout(() => {
+      this.delayedReconcileTimers.delete(timerId);
+      if (!this.initialized) {
+        return;
+      }
+      this.reconcile(`${reason}:delayed-${debounceDelay}`);
+    }, debounceDelay);
+    this.delayedReconcileTimers.add(timerId);
   }
 
   private emit(): void {

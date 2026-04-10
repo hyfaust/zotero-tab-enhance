@@ -48,8 +48,11 @@ export default class TabEnhance {
       this.ztoolkit.log("TabEnhance module already initialized, skipping");
       return;
     }
+    // Register event handler references first
     this.registerEventHandlers();
+    // Clean up any potentially lingering listeners from previous sessions
     this.removeAllEventListeners();
+    // Attach fresh event listeners to DOM elements
     this.attachEventListeners();
     this.initialized = true;
     this.ztoolkit.log("TabEnhance module initialized successfully");
@@ -96,7 +99,7 @@ export default class TabEnhance {
     const tabNameElement = tabElement.querySelector(".tab-name");
     if (tabNameElement) {
       tabTitle =
-        tabNameElement.getAttribute("title") || tabNameElement.textContent;
+        tabNameElement.getAttribute("title") || tabNameElement.textContent || null;
     }
 
     return { tabId, isSelected, tabTitle };

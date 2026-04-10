@@ -14,11 +14,22 @@ import {
   VirtualGroupMember,
 } from "./types";
 
-const DEFAULT_EXPANDED_WIDTH = 260;
-const COLLAPSED_WIDTH = 44;
-const DROP_POSITION_HYSTERESIS = 8;
-const SIDEBAR_STATE_PREF_KEY = "verticalTabs.sidebarState";
-const GROUPS_STATE_PREF_KEY = "verticalTabs.groups";
+// UI Constants
+const SIDEBAR = {
+  DEFAULT_EXPANDED_WIDTH: 260,
+  COLLAPSED_WIDTH: 44,
+  MIN_WIDTH: 160,
+  ROW_HEIGHT: 72,
+  ANIMATION_DURATION_MS: 250,
+  SEARCH_DEBOUNCE_MS: 200,
+  DROP_HYSTERESIS: 8,
+  MEMBER_OPEN_DELAY_MS: 80,
+} as const;
+
+const PREF_KEYS = {
+  SIDEBAR_STATE: "verticalTabs.sidebarState",
+  GROUPS_STATE: "verticalTabs.groups",
+} as const;
 
 type DropPosition = "before" | "after";
 type SidebarViewMode = "default" | "recent" | "type";
@@ -47,7 +58,7 @@ export default class VerticalTabSidebar {
   private readonly groupStore: TabGroupStore;
   private initialized = false;
   private collapsed = false;
-  private expandedWidth = DEFAULT_EXPANDED_WIDTH;
+  private expandedWidth: number = SIDEBAR.DEFAULT_EXPANDED_WIDTH;
   private searchQuery = "";
   private viewMode: SidebarViewMode = "default";
   private sidebar?: XULElement;
@@ -119,6 +130,34 @@ export default class VerticalTabSidebar {
       this.searchDebounceTimer = null;
     }, 200);
   };
+
+  private processDragOver(
+    event: DragEvent,
+    checkSortableRow: () => boolean,
+    resolveTarget: (clientY: number) => { tabKey: string | null; groupId?: string | null; memberKey?: string | null; position: DropPosition } | null,
+    setIndicator: (target: NonNullable<ReturnType<typeof resolveTarget>>) => void,
+  ): void {
+    if (!this.listContainer) {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+
+    if (checkSortableRow()) {
+      return;
+    }
+
+    const target = resolveTarget(event.clientY);
+    if (!target) {
+      this.clearDropIndicator();
+      return;
+    }
+
+    setIndicator(target);
+  }
 
   private readonly handleListDragOver = (event: DragEvent) => {
     if (!this.listContainer) {
@@ -714,7 +753,7 @@ export default class VerticalTabSidebar {
 
     if (this.collapsed) {
       this.sidebar.classList.add("is-collapsed");
-      this.sidebar.style.width = `${COLLAPSED_WIDTH}px`;
+      this.sidebar.style.width = `${SIDEBAR.COLLAPSED_WIDTH}px`;
       this.splitter.setAttribute("hidden", "true");
     } else {
       this.sidebar.classList.remove("is-collapsed");
@@ -725,7 +764,7 @@ export default class VerticalTabSidebar {
 
   private restorePersistedState(): void {
     const sidebarState = getJSONPref<Partial<SidebarState>>(
-      SIDEBAR_STATE_PREF_KEY,
+      PREF_KEYS.SIDEBAR_STATE,
       {},
     );
 
@@ -753,7 +792,7 @@ export default class VerticalTabSidebar {
     }
 
     const restoredGroups = this.sanitizeGroups(
-      getJSONPref<VirtualGroup[]>(GROUPS_STATE_PREF_KEY, []),
+      getJSONPref<VirtualGroup[]>(PREF_KEYS.GROUPS_STATE, []),
     );
     if (restoredGroups.length > 0) {
       this.groupStore.setGroups(restoredGroups);
@@ -771,11 +810,11 @@ export default class VerticalTabSidebar {
       selectedKeys: [],
       viewMode: this.viewMode,
     };
-    setJSONPref(SIDEBAR_STATE_PREF_KEY, state);
+    setJSONPref(PREF_KEYS.SIDEBAR_STATE, state);
   }
 
   private persistGroupsState(): void {
-    setJSONPref(GROUPS_STATE_PREF_KEY, this.groupStore.getGroups());
+    setJSONPref(PREF_KEYS.GROUPS_STATE, this.groupStore.getGroups());
   }
 
   private sanitizeGroups(groups: VirtualGroup[]): VirtualGroup[] {
@@ -1309,7 +1348,7 @@ export default class VerticalTabSidebar {
     }) as HTMLDivElement;
     setCollapsibleMeasuredHeight(
       members,
-      `${Math.max(72, renderable.members.length * 72)}px`,
+      `${Math.max(SIDEBAR.ROW_HEIGHT, renderable.members.length * SIDEBAR.ROW_HEIGHT)}px`,
     );
     this.applyGroupMembersVisibility(members, renderable.group.collapsed);
 
@@ -1376,7 +1415,7 @@ export default class VerticalTabSidebar {
     const timerId = this.window.setTimeout(() => {
       this.pendingGroupToggleTimers.delete(groupId);
       this.groupStore.toggleCollapsed(groupId);
-    }, 250);
+    }, SIDEBAR.ANIMATION_DURATION_MS);
     this.pendingGroupToggleTimers.set(groupId, timerId);
   }
 
@@ -1393,26 +1432,26 @@ export default class VerticalTabSidebar {
     return groups
       .map((group) => {
         const groupNameMatches = this.matchesGroupName(group.name);
-        const members = group.members.filter((member) => {
-          if (groupNameMatches || !this.searchQuery) {
-            return true;
-          }
+        
+        // Single pass: lookup liveTab, then filter and map together
+        const enrichedMembers = group.members
+          .map((member) => {
+            const liveTab = this.trackedTabsByMemberKey.get(member.key) ?? null;
+            return { member, liveTab };
+          })
+          .filter(({ member, liveTab }) => {
+            if (groupNameMatches || !this.searchQuery) return true;
+            return this.matchesGroupMember(liveTab ?? member);
+          });
 
-          // Use O(1) Map lookup instead of method call
-          const liveTab = this.trackedTabsByMemberKey.get(member.key) ?? null;
-          return this.matchesGroupMember(liveTab ?? member);
-        });
-
-        if (!groupNameMatches && members.length === 0) {
+        if (!groupNameMatches && enrichedMembers.length === 0) {
           return null;
         }
 
         return {
           group,
-          members: members.map((member) => {
-            // Use O(1) Map lookup, only once per member
-            const liveTab = this.trackedTabsByMemberKey.get(member.key) ?? null;
-            return liveTab
+          members: enrichedMembers.map(({ member, liveTab }) =>
+            liveTab
               ? {
                   ...member,
                   sourceTabKey: liveTab.key,
@@ -1425,8 +1464,8 @@ export default class VerticalTabSidebar {
                   openedAt: liveTab.openedAt,
                   iconKey: liveTab.iconKey,
                 }
-              : member;
-          }),
+              : member,
+          ),
         };
       })
       .filter((group): group is RenderableGroup => Boolean(group));
@@ -2466,13 +2505,15 @@ export default class VerticalTabSidebar {
     }
   }
 
-  private showGroupSelectionMenu(tabs: TrackedTab[]): void {
-    const groups = this.groupStore.getGroups();
+  private showPanelWithGroupButtons(
+    panelId: string,
+    groups: VirtualGroup[],
+    handlerFactory: (group: VirtualGroup) => () => void,
+  ): void {
     if (groups.length === 0) return;
 
-    // Create a temporary panel for group selection
     const panel = ztoolkit.createXULElement(this.document, "panel") as unknown as XULPopupElement;
-    panel.setAttribute("id", `${config.addonRef}-group-selection-panel`);
+    panel.setAttribute("id", `${config.addonRef}-${panelId}`);
     panel.setAttribute("type", "arrow");
     panel.setAttribute("flip", "both");
 
@@ -2495,7 +2536,7 @@ export default class VerticalTabSidebar {
           {
             type: "click",
             listener: () => {
-              this.addSelectedToGroup(group.id);
+              handlerFactory(group)();
               panel.hidePopup();
               panel.remove();
             },
@@ -2519,6 +2560,17 @@ export default class VerticalTabSidebar {
     );
   }
 
+  private showGroupSelectionMenu(tabs: TrackedTab[]): void {
+    const groups = this.groupStore.getGroups();
+    if (groups.length === 0) return;
+
+    this.showPanelWithGroupButtons(
+      "group-selection-panel",
+      groups,
+      (group) => () => this.addSelectedToGroup(group.id),
+    );
+  }
+
   private addMemberToGroup(groupId: string, member: VirtualGroupMember): void {
     // Add virtual member to another group using itemID, preserving original title
     if (member.itemID != null) {
@@ -2536,52 +2588,10 @@ export default class VerticalTabSidebar {
     const groups = this.groupStore.getGroups();
     if (groups.length === 0) return;
 
-    // Create a temporary panel for group selection
-    const panel = ztoolkit.createXULElement(this.document, "panel") as unknown as XULPopupElement;
-    panel.setAttribute("id", `${config.addonRef}-group-member-selection-panel`);
-    panel.setAttribute("type", "arrow");
-    panel.setAttribute("flip", "both");
-
-    const panelBody = ztoolkit.UI.createElement(this.document, "div", {
-      namespace: "html",
-      classList: ["tab-enhance-group-selection-panel"],
-    }) as HTMLDivElement;
-
-    groups.forEach((group) => {
-      const button = ztoolkit.UI.createElement(this.document, "button", {
-        namespace: "html",
-        classList: ["tab-enhance-group-selection-button"],
-        properties: {
-          textContent: group.name,
-        },
-        attributes: {
-          style: `color: ${group.color}; border-left: 3px solid ${group.color};`,
-        },
-        listeners: [
-          {
-            type: "click",
-            listener: () => {
-              this.addSelectedGroupMembersToGroup(group.id);
-              panel.hidePopup();
-              panel.remove();
-            },
-          },
-        ],
-      }) as HTMLButtonElement;
-      panelBody.appendChild(button);
-    });
-
-    panel.appendChild(panelBody);
-
-    const popupHost =
-      this.document.getElementById("mainPopupSet") ??
-      this.document.documentElement;
-    popupHost?.appendChild(panel);
-
-    panel.openPopupAtScreen(
-      this.lastContextMenuPoint.x + 8,
-      this.lastContextMenuPoint.y + 8,
-      true,
+    this.showPanelWithGroupButtons(
+      "group-member-selection-panel",
+      groups,
+      (group) => () => this.addSelectedGroupMembersToGroup(group.id),
     );
   }
 
@@ -2777,7 +2787,7 @@ export default class VerticalTabSidebar {
 
     for (const member of group.members) {
       await this.ensureGroupMemberOpen(groupId, member.key, false);
-      await this.wait(80);
+      await this.wait(SIDEBAR.MEMBER_OPEN_DELAY_MS);
     }
 
     this.tracker.reconcile(`group-open-all:${groupId}`);
@@ -3272,7 +3282,7 @@ export default class VerticalTabSidebar {
       rowGroupId === this.dragOverHeaderGroupId &&
       !rowMemberKey &&
       this.dragOverPosition &&
-      Math.abs(pointerY - middleY) <= DROP_POSITION_HYSTERESIS
+      Math.abs(pointerY - middleY) <= SIDEBAR.DROP_HYSTERESIS
     ) {
       return this.dragOverPosition;
     }
@@ -3282,7 +3292,7 @@ export default class VerticalTabSidebar {
       rowGroupId === this.dragOverGroupId &&
       rowMemberKey === this.dragOverMemberKey &&
       this.dragOverPosition &&
-      Math.abs(pointerY - middleY) <= DROP_POSITION_HYSTERESIS
+      Math.abs(pointerY - middleY) <= SIDEBAR.DROP_HYSTERESIS
     ) {
       return this.dragOverPosition;
     }
@@ -3292,7 +3302,7 @@ export default class VerticalTabSidebar {
       rowTabKey &&
       rowTabKey === this.dragOverTabKey &&
       this.dragOverPosition &&
-      Math.abs(pointerY - middleY) <= DROP_POSITION_HYSTERESIS
+      Math.abs(pointerY - middleY) <= SIDEBAR.DROP_HYSTERESIS
     ) {
       return this.dragOverPosition;
     }

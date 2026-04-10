@@ -157,7 +157,12 @@ export default class TabCommandController {
 
       this.window.Zotero_Tabs.close(entry.tab.id);
       await this.waitForTabToClose(entry.tab.id);
-      await (Zotero as any).FileHandlers.open(item);
+      const FileHandlers = (Zotero as any).FileHandlers;
+      if (FileHandlers && typeof FileHandlers.open === "function") {
+        await FileHandlers.open(item);
+      } else {
+        ztoolkit.log("TabCommandController.reload: FileHandlers.open not available");
+      }
     } catch (error) {
       ztoolkit.log("TabCommandController.reload failed", tabId, error);
     }
