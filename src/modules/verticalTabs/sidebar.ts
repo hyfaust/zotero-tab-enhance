@@ -220,7 +220,7 @@ export default class VerticalTabSidebar {
     if ((event.key === "Delete" || event.key === "Backspace") && this.selectedGroupMemberKeys.size > 0) {
       event.preventDefault();
       event.stopPropagation();
-      this.removeSelectedFromGroup();
+      this.removeSelectedFromGroup(); // Remove from all groups when using keyboard
       return;
     }
 
@@ -2354,28 +2354,53 @@ export default class VerticalTabSidebar {
     }
   }
 
-  private removeSelectedFromGroup(): void {
-    this.selectedTabKeys.forEach(tabKey => {
-      const groups = this.groupStore.getGroups();
-      groups.forEach(group => {
-        const member = group.members.find(m => {
-          const tab = this.trackedTabsByKey.get(tabKey);
-          return tab && this.groupStore.makeMemberKeyFromTab(tab) === m.key;
+  private removeSelectedFromGroup(currentGroupId?: string): void {
+    if (currentGroupId) {
+      // Only remove from the specific group
+      const group = this.groupStore.findGroupById(currentGroupId);
+      if (group) {
+        // Remove selected group members from this group
+        this.selectedGroupMemberKeys.forEach(memberKey => {
+          if (group.members.some(m => m.key === memberKey)) {
+            this.groupStore.removeMember(currentGroupId, memberKey);
+          }
         });
-        if (member) {
-          this.groupStore.removeMember(group.id, member.key);
-        }
-      });
-    });
 
-    this.selectedGroupMemberKeys.forEach(memberKey => {
-      const groups = this.groupStore.getGroups();
-      groups.forEach(group => {
-        if (group.members.some(m => m.key === memberKey)) {
-          this.groupStore.removeMember(group.id, memberKey);
-        }
+        // Remove selected tabs that belong to this group
+        this.selectedTabKeys.forEach(tabKey => {
+          const tab = this.trackedTabsByKey.get(tabKey);
+          if (tab) {
+            const memberKey = this.groupStore.makeMemberKeyFromTab(tab);
+            if (group.members.some(m => m.key === memberKey)) {
+              this.groupStore.removeMember(currentGroupId, memberKey);
+            }
+          }
+        });
+      }
+    } else {
+      // Remove from all groups (old behavior)
+      this.selectedTabKeys.forEach(tabKey => {
+        const groups = this.groupStore.getGroups();
+        groups.forEach(group => {
+          const member = group.members.find(m => {
+            const tab = this.trackedTabsByKey.get(tabKey);
+            return tab && this.groupStore.makeMemberKeyFromTab(tab) === m.key;
+          });
+          if (member) {
+            this.groupStore.removeMember(group.id, member.key);
+          }
+        });
       });
-    });
+
+      this.selectedGroupMemberKeys.forEach(memberKey => {
+        const groups = this.groupStore.getGroups();
+        groups.forEach(group => {
+          if (group.members.some(m => m.key === memberKey)) {
+            this.groupStore.removeMember(group.id, memberKey);
+          }
+        });
+      });
+    }
 
     if (this.selectedTabKeys.size > 0 || this.selectedGroupMemberKeys.size > 0) {
       this.clearMultiSelect();
@@ -2452,10 +2477,10 @@ export default class VerticalTabSidebar {
   }
 
   private addMemberToGroup(groupId: string, member: VirtualGroupMember): void {
-    // Add virtual member to another group using itemID
+    // Add virtual member to another group using itemID, preserving original title
     if (member.itemID != null) {
       this.groupStore.addItemsToGroup(groupId, [
-        { itemID: member.itemID, parentItemID: member.parentItemID }
+        { itemID: member.itemID, parentItemID: member.parentItemID, title: member.title }
       ]);
     }
   }
@@ -2535,7 +2560,7 @@ export default class VerticalTabSidebar {
         const member = group?.members.find(m => m.key === memberKey);
         if (member && member.itemID != null) {
           this.groupStore.addItemsToGroup(targetGroupId, [
-            { itemID: member.itemID, parentItemID: member.parentItemID }
+            { itemID: member.itemID, parentItemID: member.parentItemID, title: member.title }
           ]);
         }
       });
@@ -2859,7 +2884,7 @@ export default class VerticalTabSidebar {
 
       this.appendMenuItem(
         getString("remove-selected-from-group") + ` (${this.selectedGroupMemberKeys.size})`,
-        () => this.removeSelectedFromGroup(),
+        () => this.removeSelectedFromGroup(groupId),
       );
 
       this.appendSeparator();
@@ -2891,7 +2916,7 @@ export default class VerticalTabSidebar {
                 const virtualGroup = this.groupStore.createEmptyGroup(name);
                 if (virtualGroup && member.itemID != null) {
                   this.groupStore.addItemsToGroup(virtualGroup.id, [
-                    { itemID: member.itemID, parentItemID: member.parentItemID }
+                    { itemID: member.itemID, parentItemID: member.parentItemID, title: member.title }
                   ]);
                 }
               });

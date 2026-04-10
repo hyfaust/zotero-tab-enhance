@@ -358,7 +358,7 @@ export default class TabGroupStore {
 
   public addItemsToGroup(
     groupId: string,
-    items: Array<{ itemID: number; parentItemID: number | null }>,
+    items: Array<{ itemID: number; parentItemID: number | null; title?: string }>,
   ): void {
     if (!items || items.length === 0) {
       return;
@@ -373,7 +373,7 @@ export default class TabGroupStore {
       const existingKeys = new Set(group.members.map((m) => m.key));
       const newMembers: VirtualGroupMember[] = [];
 
-      items.forEach(({ itemID, parentItemID }) => {
+      items.forEach(({ itemID, parentItemID, title }) => {
         const item = Zotero.Items.get(itemID);
         if (!item) return;
 
@@ -390,7 +390,7 @@ export default class TabGroupStore {
           sourceTabKey: null,
           tabId: null,
           type: "reader",
-          title: item.getDisplayTitle() || topLevelItem?.getDisplayTitle() || "Unknown",
+          title: title || item.getDisplayTitle() || topLevelItem?.getDisplayTitle() || "Unknown",
           itemID: item.isFileAttachment() ? itemID : null,
           parentItemID: parentItemID || topLevelItem?.id || itemID,
           isOpen: false,
