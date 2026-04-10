@@ -1787,11 +1787,12 @@ export default class VerticalTabSidebar {
     event.stopPropagation();
 
     const tabKey = row.dataset.tabKey ?? null;
+    const memberKey = row.dataset.memberKey ?? null;
     if (!tabKey) return;
 
     // Try multi-select toggle first
     const groupId = row.dataset.groupId ?? null;
-    const consumed = this.toggleMultiSelect(tabKey, event, groupId);
+    const consumed = this.toggleMultiSelect(tabKey, memberKey, event, groupId);
     if (consumed) {
       // Multi-select mode: don't open tab
       return;
@@ -2199,27 +2200,58 @@ export default class VerticalTabSidebar {
 
   // ==================== Multi-select Methods ====================
 
-  private toggleMultiSelect(tabKey: string, event: MouseEvent, groupId?: string | null): boolean {
-    if (!tabKey) return false;
+  private toggleMultiSelect(tabKey: string, memberKey: string | null, event: MouseEvent, groupId?: string | null): boolean {
+    // For tabs inside a group, prefer the memberKey for list matching
+    const activeKey = memberKey || tabKey;
+    if (!activeKey) return false;
 
-    const visibleTabs = this.getVisibleSortableTabs(this.tracker.getSnapshot());
-    const currentIndex = visibleTabs.findIndex(tab => tab.key === tabKey);
+    // Determine the visual list based on context
+    let currentList: string[] = [];
+    if (groupId) {
+      const group = this.groupStore.findGroupById(groupId);
+      if (group) {
+        currentList = group.members.map(m => m.key);
+      }
+    } else {
+      // For ungrouped tabs, use the visual order in the sidebar
+      const allTabs = this.tracker.getSnapshot().tabs.filter(t => this.shouldRenderTab(t));
+      currentList = allTabs.filter(t => this.getGroupIdForKey(t.key) === null).map(t => t.key);
+    }
+
+    const currentIndex = currentList.indexOf(activeKey);
 
     if (event.shiftKey && this.lastSelectedIndex >= 0 && this.lastSelectedGroupId === groupId) {
-      // Shift+Click: Range selection (only within same group)
-      this.selectRange(tabKey, visibleTabs, groupId);
+      // Shift+Click: Range selection within the same visual list
+      const start = Math.min(this.lastSelectedIndex, currentIndex);
+      const end = Math.max(this.lastSelectedIndex, currentIndex);
+      for (let i = start; i <= end; i++) {
+        const key = currentList[i];
+        if (groupId) {
+          this.selectedGroupMemberKeys.add(key);
+        } else {
+          this.selectedTabKeys.add(key);
+        }
+      }
     } else if (event.ctrlKey || event.metaKey) {
       // Ctrl/Cmd+Click: Toggle single selection
-      if (this.selectedTabKeys.has(tabKey)) {
-        this.selectedTabKeys.delete(tabKey);
+      if (groupId) {
+        if (this.selectedGroupMemberKeys.has(activeKey)) {
+          this.selectedGroupMemberKeys.delete(activeKey);
+        } else {
+          this.selectedGroupMemberKeys.add(activeKey);
+        }
       } else {
-        this.selectedTabKeys.add(tabKey);
+        if (this.selectedTabKeys.has(activeKey)) {
+          this.selectedTabKeys.delete(activeKey);
+        } else {
+          this.selectedTabKeys.add(activeKey);
+        }
       }
       this.lastSelectedIndex = currentIndex;
       this.lastSelectedGroupId = groupId || null;
     } else {
       // Regular click: If there are selections, keep them; otherwise, open tab
-      if (this.selectedTabKeys.size > 0) {
+      if ((groupId && this.selectedGroupMemberKeys.size > 0) || this.selectedTabKeys.size > 0) {
         return true; // Consume the click, don't open tab
       }
       return false; // Let original handler open the tab
@@ -2229,30 +2261,14 @@ export default class VerticalTabSidebar {
     return true;
   }
 
-  private selectRange(tabKey: string, visibleTabs: TrackedTab[], groupId?: string | null): void {
-    const currentIndex = visibleTabs.findIndex(tab => tab.key === tabKey);
-    if (currentIndex < 0 || this.lastSelectedIndex < 0) return;
-
-    // Only select tabs within the same group
-    const start = Math.min(this.lastSelectedIndex, currentIndex);
-    const end = Math.max(this.lastSelectedIndex, currentIndex);
-
-    for (let i = start; i <= end; i++) {
-      const tab = visibleTabs[i];
-      // Only add if it's in the same group (or both are ungrouped)
-      const tabGroupId = this.getGroupIdForKey(tab.key);
-      if (tabGroupId === groupId) {
-        this.selectedTabKeys.add(tab.key);
-      }
-    }
-    this.lastSelectedIndex = currentIndex;
-    this.lastSelectedGroupId = groupId || null;
-  }
-
   private getGroupIdForKey(tabKey: string): string | null {
+    const tab = this.trackedTabsByKey.get(tabKey);
+    if (!tab) return null;
+    
+    const memberKey = this.groupStore.makeMemberKeyFromTab(tab);
     const groups = this.groupStore.getGroups();
     for (const group of groups) {
-      if (group.members.some(m => m.key === tabKey || this.groupStore.makeMemberKeyFromTab(this.trackedTabsByKey.get(tabKey)!) === m.key)) {
+      if (group.members.some(m => m.key === memberKey)) {
         return group.id;
       }
     }
