@@ -12,13 +12,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Rphone/zotero-tab-enhance.git"
+    "url": "git+https://github.com/hyfaust/zotero-tab-enhance.git"
   },
   "author": "Rphone",
   "bugs": {
-    "url": "https://github.com/Rphone/zotero-tab-enhance/issues"
+    "url": "https://github.com/hyfaust/zotero-tab-enhance/issues"
   },
-  "homepage": "https://github.com/Rphone/zotero-tab-enhance#readme",
+  "homepage": "https://github.com/hyfaust/zotero-tab-enhance#readme",
   "license": "AGPLv3",
   "scripts": {
     "start": "zotero-plugin serve",

@@ -2220,19 +2220,8 @@ export default class VerticalTabSidebar {
 
     const currentIndex = currentList.indexOf(activeKey);
 
-    if (event.shiftKey && this.lastSelectedIndex >= 0 && this.lastSelectedGroupId === groupId) {
-      // Shift+Click: Range selection within the same visual list
-      const start = Math.min(this.lastSelectedIndex, currentIndex);
-      const end = Math.max(this.lastSelectedIndex, currentIndex);
-      for (let i = start; i <= end; i++) {
-        const key = currentList[i];
-        if (groupId) {
-          this.selectedGroupMemberKeys.add(key);
-        } else {
-          this.selectedTabKeys.add(key);
-        }
-      }
-    } else if (event.ctrlKey || event.metaKey) {
+    // Always set the last selected index on Ctrl+Click or first click
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
       // Ctrl/Cmd+Click: Toggle single selection
       if (groupId) {
         if (this.selectedGroupMemberKeys.has(activeKey)) {
@@ -2247,6 +2236,21 @@ export default class VerticalTabSidebar {
           this.selectedTabKeys.add(activeKey);
         }
       }
+
+      // If shift is also held, do range selection
+      if (event.shiftKey && this.lastSelectedIndex >= 0 && this.lastSelectedGroupId === groupId) {
+        const start = Math.min(this.lastSelectedIndex, currentIndex);
+        const end = Math.max(this.lastSelectedIndex, currentIndex);
+        for (let i = start; i <= end; i++) {
+          const key = currentList[i];
+          if (groupId) {
+            this.selectedGroupMemberKeys.add(key);
+          } else {
+            this.selectedTabKeys.add(key);
+          }
+        }
+      }
+      
       this.lastSelectedIndex = currentIndex;
       this.lastSelectedGroupId = groupId || null;
     } else {
