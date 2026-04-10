@@ -7,8 +7,6 @@
 
 A powerful Zotero 7 add-on that enhances tab management with vertical sidebar, grouping, batch operations, and more.
 
-English | [简体中文](doc/README_zh.md)
-
 ## Features
 
 ### Enhanced Horizontal Tab Context Menu
@@ -169,8 +167,7 @@ Under the following terms:
 ## Acknowledgments
 
 - [Zotero Plugin Template](https://github.com/windingwind/zotero-plugin-template) for providing the development scaffold
-- [Ethereal Style](https://github.com/MuiseDestiny/zotero-style) and [bilibili tutorial](https://www.bilibili.com/video/BV1rwcBzbEVG/) for sidebar implementation insights
-- Microsoft Edge tab grouping for UI/UX inspiration
+- [Rphone/zotero-tab-enhance](https://github.com/Rphone/zotero-tab-enhance) — This project is a fork and major enhancement of the original Tab Enhance plugin. The initial codebase, architecture decisions, and core features (vertical sidebar, tab tracking, grouping system) were inherited from the original project. Significant new features, bug fixes, and performance optimizations have been added on top of that foundation.
 
 ## Reporting Issues
 
