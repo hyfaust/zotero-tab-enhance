@@ -91,6 +91,7 @@ export default class VerticalTabSidebar {
   private lastSelectedIndex: number = -1;
   private lastSelectedGroupId: string | null = null;
   private isResizing: boolean = false;
+  private searchDebounceTimer: number | null = null;
 
   private readonly handleResizeEnd = () => {
     if (!this.sidebar || this.collapsed || !this.isResizing) {
@@ -103,6 +104,20 @@ export default class VerticalTabSidebar {
       this.persistSidebarState();
     }
     this.isResizing = false;
+  };
+
+  private readonly handleSearchInput = (event: Event) => {
+    if (this.searchDebounceTimer) {
+      this.window.clearTimeout(this.searchDebounceTimer);
+    }
+
+    this.searchDebounceTimer = this.window.setTimeout(() => {
+      const target = event.currentTarget as HTMLInputElement | null;
+      this.searchQuery = target?.value.trim().toLocaleLowerCase() ?? "";
+      this.persistSidebarState();
+      this.render(this.tracker.getSnapshot());
+      this.searchDebounceTimer = null;
+    }, 200);
   };
 
   private readonly handleListDragOver = (event: DragEvent) => {
@@ -290,6 +305,10 @@ export default class VerticalTabSidebar {
     this.render(this.tracker.getSnapshot());
   }
 
+  public getGroupStore(): TabGroupStore {
+    return this.groupStore;
+  }
+
   public destroy(): void {
     if (!this.initialized) {
       return;
@@ -309,6 +328,12 @@ export default class VerticalTabSidebar {
     });
     this.pendingGroupToggleTimers.clear();
     this.pendingMemberOpenPromises.clear();
+
+    // Clear search debounce timer
+    if (this.searchDebounceTimer) {
+      this.window.clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
     this.window.removeEventListener("mouseup", this.handleResizeEnd);
     this.window.removeEventListener("dragend", this.handleWindowDragEnd, true);
     this.window.removeEventListener("keydown", this.handleGlobalKeyDown, true);
@@ -451,12 +476,7 @@ export default class VerticalTabSidebar {
       listeners: [
         {
           type: "input",
-          listener: (event: Event) => {
-            const target = event.currentTarget as HTMLInputElement | null;
-            this.searchQuery = target?.value.trim().toLocaleLowerCase() ?? "";
-            this.persistSidebarState();
-            this.render(this.tracker.getSnapshot());
-          },
+          listener: this.handleSearchInput,
         },
       ],
     }) as HTMLInputElement;
@@ -1378,7 +1398,8 @@ export default class VerticalTabSidebar {
             return true;
           }
 
-          const liveTab = this.findTrackedTabByMemberKey(member.key);
+          // Use O(1) Map lookup instead of method call
+          const liveTab = this.trackedTabsByMemberKey.get(member.key) ?? null;
           return this.matchesGroupMember(liveTab ?? member);
         });
 
@@ -1389,7 +1410,8 @@ export default class VerticalTabSidebar {
         return {
           group,
           members: members.map((member) => {
-            const liveTab = this.findTrackedTabByMemberKey(member.key);
+            // Use O(1) Map lookup, only once per member
+            const liveTab = this.trackedTabsByMemberKey.get(member.key) ?? null;
             return liveTab
               ? {
                   ...member,
@@ -1860,8 +1882,8 @@ export default class VerticalTabSidebar {
     event.preventDefault();
     event.stopPropagation();
 
-    // Try multi-select toggle first
-    const consumed = this.toggleGroupMemberMultiSelect(memberKey, event);
+    // Use unified multi-select toggle for unopened (virtual) members
+    const consumed = this.toggleMultiSelect(null, memberKey, event, groupId);
     if (consumed) {
       // Multi-select mode: don't open member
       return;
@@ -2200,7 +2222,7 @@ export default class VerticalTabSidebar {
 
   // ==================== Multi-select Methods ====================
 
-  private toggleMultiSelect(tabKey: string, memberKey: string | null, event: MouseEvent, groupId?: string | null): boolean {
+  private toggleMultiSelect(tabKey: string | null, memberKey: string | null, event: MouseEvent, groupId?: string | null): boolean {
     // For tabs inside a group, prefer the memberKey for list matching
     const activeKey = memberKey || tabKey;
     if (!activeKey) return false;
@@ -2219,6 +2241,7 @@ export default class VerticalTabSidebar {
     }
 
     const currentIndex = currentList.indexOf(activeKey);
+    if (currentIndex === -1) return false;
 
     // Always set the last selected index on Ctrl+Click or first click
     if (event.ctrlKey || event.metaKey || event.shiftKey) {

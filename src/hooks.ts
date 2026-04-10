@@ -51,7 +51,7 @@ function syncWindowFeatures(win: _ZoteroTypes.MainWindow): void {
         if (!addon.libraryContextMenuInstances.has(win)) {
           const libraryContextMenu = new LibraryContextMenu(
             win,
-            verticalTabSidebar["groupStore"],
+            verticalTabSidebar.getGroupStore(),
           );
           libraryContextMenu.init();
           addon.libraryContextMenuInstances.set(win, libraryContextMenu);
