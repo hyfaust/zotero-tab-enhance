@@ -79,7 +79,7 @@ export default class TabGroupStore {
           ...nextMember,
           id: member.id,
         };
-        if (JSON.stringify(normalizedMember) !== JSON.stringify(member)) {
+        if (!this.isSameMember(member, normalizedMember)) {
           changed = true;
         }
         return normalizedMember;
@@ -148,31 +148,29 @@ export default class TabGroupStore {
 
   public removeMember(groupId: string, memberKey: string): void {
     let changed = false;
-    this.groups = this.groups
-      .map((group) => {
-        if (group.id !== groupId) {
-          return group;
-        }
+    this.groups = this.groups.map((group) => {
+      if (group.id !== groupId) {
+        return group;
+      }
 
-        const members = group.members.filter(
-          (member) => member.key !== memberKey,
-        );
-        if (members.length === group.members.length) {
-          return group;
-        }
-        changed = true;
-        return {
-          ...group,
-          members,
-        };
-      });
+      const members = group.members.filter(
+        (member) => member.key !== memberKey,
+      );
+      if (members.length === group.members.length) {
+        return group;
+      }
+      changed = true;
+      return {
+        ...group,
+        members,
+      };
+    });
     // Allow empty groups to exist (don't auto-dissolve)
 
     if (changed) {
       this.emit();
     }
   }
-
 
   public reorderMember(
     groupId: string,
@@ -358,7 +356,11 @@ export default class TabGroupStore {
 
   public addItemsToGroup(
     groupId: string,
-    items: Array<{ itemID: number; parentItemID: number | null; title?: string }>,
+    items: Array<{
+      itemID: number;
+      parentItemID: number | null;
+      title?: string;
+    }>,
   ): void {
     if (!items || items.length === 0) {
       return;
@@ -390,7 +392,11 @@ export default class TabGroupStore {
           sourceTabKey: null,
           tabId: null,
           type: "reader",
-          title: title || item.getDisplayTitle() || topLevelItem?.getDisplayTitle() || "Unknown",
+          title:
+            title ||
+            item.getDisplayTitle() ||
+            topLevelItem?.getDisplayTitle() ||
+            "Unknown",
           itemID: item.isFileAttachment() ? itemID : null,
           parentItemID: parentItemID || topLevelItem?.id || itemID,
           isOpen: false,
@@ -584,5 +590,24 @@ export default class TabGroupStore {
         ztoolkit.log("TabGroupStore listener failed", error);
       }
     });
+  }
+
+  private isSameMember(
+    left: VirtualGroupMember,
+    right: VirtualGroupMember,
+  ): boolean {
+    return (
+      left.id === right.id &&
+      left.key === right.key &&
+      left.sourceTabKey === right.sourceTabKey &&
+      left.tabId === right.tabId &&
+      left.type === right.type &&
+      left.title === right.title &&
+      left.itemID === right.itemID &&
+      left.parentItemID === right.parentItemID &&
+      left.isOpen === right.isOpen &&
+      left.openedAt === right.openedAt &&
+      left.iconKey === right.iconKey
+    );
   }
 }

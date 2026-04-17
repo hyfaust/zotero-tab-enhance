@@ -1,7 +1,7 @@
 {
   "name": "zotero-tab-enhance",
   "type": "module",
-  "version": "0.4.2",
+  "version": "1.1.0",
   "description": "Tab Enhance is a Zotero add-on that add some useful features to the tab pane.",
   "config": {
     "addonName": "Tab Enhance",
@@ -14,7 +14,7 @@
     "type": "git",
     "url": "git+https://github.com/hyfaust/zotero-tab-enhance.git"
   },
-  "author": "Rphone",
+  "author": "Hyfaust, Rphone",
   "bugs": {
     "url": "https://github.com/hyfaust/zotero-tab-enhance/issues"
   },

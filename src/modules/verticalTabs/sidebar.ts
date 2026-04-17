@@ -1,10 +1,34 @@
 import { config } from "../../../package.json";
 import { getString } from "../../utils/locale";
-import { getGroupColorPalette, getJSONPref, getPref, setJSONPref } from "../../utils/prefs";
+import {
+  getGroupColorPalette,
+  getJSONPref,
+  getPref,
+  setJSONPref,
+} from "../../utils/prefs";
 import TabTrackerService from "./tabTracker";
 import TabCommandController, { TabCommandItem } from "./tabCommands";
 import TabGroupStore from "./groupStore";
-import { setCollapsibleMeasuredHeight, syncCollapsibleState } from "./collapsible";
+import SidebarRenderer, { RenderEntry } from "./sidebarRenderer";
+import {
+  addSelectedGroupMembersToGroup,
+  addSelectedToGroup,
+  clearMultiSelect,
+  closeSelectedTabs,
+  getSelectedTabs,
+  type SidebarMultiSelectHost,
+  removeSelectedFromGroup,
+  selectAllMembersInGroup,
+  showGroupMemberSelectionMenu,
+  showGroupSelectionMenu,
+  toggleGroupMemberMultiSelect,
+  toggleMultiSelect,
+  updateMultiSelectUI,
+} from "./sidebarMultiSelect";
+import {
+  setCollapsibleMeasuredHeight,
+  syncCollapsibleState,
+} from "./collapsible";
 import {
   LIBRARY_TAB_ID,
   SidebarState,
@@ -56,6 +80,7 @@ export default class VerticalTabSidebar {
   private readonly tracker: TabTrackerService;
   private readonly commandController: TabCommandController;
   private readonly groupStore: TabGroupStore;
+  private sidebarRenderer?: SidebarRenderer;
   private initialized = false;
   private collapsed = false;
   private expandedWidth: number = SIDEBAR.DEFAULT_EXPANDED_WIDTH;
@@ -103,6 +128,8 @@ export default class VerticalTabSidebar {
   private lastSelectedGroupId: string | null = null;
   private isResizing: boolean = false;
   private searchDebounceTimer: number | null = null;
+  private dragOverFrameId: number | null = null;
+  private pendingDragOverTask: (() => void) | null = null;
 
   private readonly handleResizeEnd = () => {
     if (!this.sidebar || this.collapsed || !this.isResizing) {
@@ -134,8 +161,15 @@ export default class VerticalTabSidebar {
   private processDragOver(
     event: DragEvent,
     checkSortableRow: () => boolean,
-    resolveTarget: (clientY: number) => { tabKey: string | null; groupId?: string | null; memberKey?: string | null; position: DropPosition } | null,
-    setIndicator: (target: NonNullable<ReturnType<typeof resolveTarget>>) => void,
+    resolveTarget: (clientY: number) => {
+      tabKey: string | null;
+      groupId?: string | null;
+      memberKey?: string | null;
+      position: DropPosition;
+    } | null,
+    setIndicator: (
+      target: NonNullable<ReturnType<typeof resolveTarget>>,
+    ) => void,
   ): void {
     if (!this.listContainer) {
       return;
@@ -159,6 +193,28 @@ export default class VerticalTabSidebar {
     setIndicator(target);
   }
 
+  private scheduleDragOver(task: () => void): void {
+    this.pendingDragOverTask = task;
+    if (this.dragOverFrameId != null) {
+      return;
+    }
+
+    this.dragOverFrameId = this.window.requestAnimationFrame(() => {
+      this.dragOverFrameId = null;
+      const pendingTask = this.pendingDragOverTask;
+      this.pendingDragOverTask = null;
+      pendingTask?.();
+    });
+  }
+
+  private cancelDragOverFrame(): void {
+    if (this.dragOverFrameId != null) {
+      this.window.cancelAnimationFrame(this.dragOverFrameId);
+      this.dragOverFrameId = null;
+    }
+    this.pendingDragOverTask = null;
+  }
+
   private readonly handleListDragOver = (event: DragEvent) => {
     if (!this.listContainer) {
       return;
@@ -170,18 +226,22 @@ export default class VerticalTabSidebar {
         event.dataTransfer.dropEffect = "move";
       }
 
-      const header = this.getSortableGroupHeaderFromEventTarget(event.target);
-      if (header) {
-        return;
-      }
+      const target = event.target;
+      const clientY = event.clientY;
+      this.scheduleDragOver(() => {
+        const header = this.getSortableGroupHeaderFromEventTarget(target);
+        if (header) {
+          return;
+        }
 
-      const target = this.resolveGroupHeaderDropTargetFromPoint(event.clientY);
-      if (!target) {
-        this.clearDropIndicator();
-        return;
-      }
+        const nextTarget = this.resolveGroupHeaderDropTargetFromPoint(clientY);
+        if (!nextTarget) {
+          this.clearDropIndicator();
+          return;
+        }
 
-      this.setGroupHeaderDropIndicator(target.groupId, target.position);
+        this.setGroupHeaderDropIndicator(nextTarget.groupId, nextTarget.position);
+      });
       return;
     }
 
@@ -193,19 +253,22 @@ export default class VerticalTabSidebar {
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = "move";
     }
+    const target = event.target;
+    const clientY = event.clientY;
+    this.scheduleDragOver(() => {
+      const row = this.getSortableRowFromEventTarget(target);
+      if (row) {
+        return;
+      }
 
-    const row = this.getSortableRowFromEventTarget(event.target);
-    if (row) {
-      return;
-    }
+      const nextTarget = this.resolveDropTargetFromPoint(clientY);
+      if (!nextTarget) {
+        this.clearDropIndicator();
+        return;
+      }
 
-    const target = this.resolveDropTargetFromPoint(event.clientY);
-    if (!target) {
-      this.clearDropIndicator();
-      return;
-    }
-
-    this.setDropIndicator(target.tabKey, target.position);
+      this.setDropIndicator(nextTarget.tabKey, nextTarget.position);
+    });
   };
 
   private readonly handleListDrop = (event: DragEvent) => {
@@ -263,7 +326,10 @@ export default class VerticalTabSidebar {
 
   private readonly handleGlobalKeyDown = (event: KeyboardEvent) => {
     // ESC to clear multi-select
-    if (event.key === "Escape" && (this.selectedTabKeys.size > 0 || this.selectedGroupMemberKeys.size > 0)) {
+    if (
+      event.key === "Escape" &&
+      (this.selectedTabKeys.size > 0 || this.selectedGroupMemberKeys.size > 0)
+    ) {
       event.preventDefault();
       event.stopPropagation();
       this.clearMultiSelect();
@@ -271,7 +337,10 @@ export default class VerticalTabSidebar {
     }
 
     // Delete/Backspace to remove selected from group
-    if ((event.key === "Delete" || event.key === "Backspace") && this.selectedGroupMemberKeys.size > 0) {
+    if (
+      (event.key === "Delete" || event.key === "Backspace") &&
+      this.selectedGroupMemberKeys.size > 0
+    ) {
       event.preventDefault();
       event.stopPropagation();
       this.removeSelectedFromGroup(); // Remove from all groups when using keyboard
@@ -281,11 +350,11 @@ export default class VerticalTabSidebar {
     // Ctrl+B to toggle sidebar
     if ((event.ctrlKey || event.metaKey) && event.key === "b") {
       const activeElement = this.document.activeElement;
-      const isInInput = activeElement && (
-        activeElement.tagName === "INPUT" ||
-        activeElement.tagName === "TEXTAREA" ||
-        (activeElement as HTMLElement).isContentEditable
-      );
+      const isInInput =
+        activeElement &&
+        (activeElement.tagName === "INPUT" ||
+          activeElement.tagName === "TEXTAREA" ||
+          (activeElement as HTMLElement).isContentEditable);
 
       if (!isInInput) {
         event.preventDefault();
@@ -396,6 +465,8 @@ export default class VerticalTabSidebar {
     this.groupNamePanel = undefined;
     this.groupNameInput = undefined;
     this.stylesheet = undefined;
+    this.sidebarRenderer?.clear();
+    this.sidebarRenderer = undefined;
     this.trackedTabsByKey.clear();
     this.trackedTabsByMemberKey.clear();
     this.clearDisplayMetadataCache();
@@ -582,7 +653,10 @@ export default class VerticalTabSidebar {
       },
     }) as unknown as XULPopupElement;
 
-    const groupNamePanel = ztoolkit.createXULElement(this.document, "panel") as unknown as XULPopupElement;
+    const groupNamePanel = ztoolkit.createXULElement(
+      this.document,
+      "panel",
+    ) as unknown as XULPopupElement;
     groupNamePanel.setAttribute("id", `${config.addonRef}-group-name-panel`);
     groupNamePanel.setAttribute("class", "tab-enhance-group-name-popup");
     groupNamePanel.setAttribute("type", "arrow");
@@ -681,6 +755,7 @@ export default class VerticalTabSidebar {
     this.groupNamePanel = groupNamePanel;
     this.groupNameInput = groupNameInput;
     this.applySidebarWidth();
+    this.sidebarRenderer = new SidebarRenderer(listContainer);
     return true;
   }
 
@@ -916,7 +991,9 @@ export default class VerticalTabSidebar {
           color:
             typeof group.color === "string" && group.color.trim()
               ? group.color
-              : getGroupColorPalette()[groupIndex % getGroupColorPalette().length],
+              : getGroupColorPalette()[
+                  groupIndex % getGroupColorPalette().length
+                ],
           collapsed: Boolean(group.collapsed),
           sortMode:
             group.sortMode === "recent" ||
@@ -947,7 +1024,6 @@ export default class VerticalTabSidebar {
       .getUngroupedTabs(openTabs)
       .filter((tab) => this.matchesSearch(tab));
     const aggregateSections = this.getAggregateSections(openTabs);
-    const listContainer = this.listContainer;
 
     this.trackedTabsByKey.clear();
     this.trackedTabsByMemberKey.clear();
@@ -963,7 +1039,6 @@ export default class VerticalTabSidebar {
     this.updateViewSwitcher();
     this.headerTitle.textContent = this.getViewTitle();
     this.countBadge.textContent = String(openTabs.length);
-    listContainer.textContent = "";
 
     if (
       this.draggedTabKey &&
@@ -1000,43 +1075,61 @@ export default class VerticalTabSidebar {
       (section) => section.tabs.length > 0,
     );
 
+    const entries: RenderEntry[] = [];
+    const selectedTabKey = snapshot.selectedTabKey;
+
     if (
       (this.viewMode === "default" && !hasDefaultContent) ||
       (this.viewMode !== "default" && !hasAggregateContent)
     ) {
-      const emptyState = ztoolkit.UI.createElement(this.document, "div", {
-        namespace: "html",
-        classList: ["tab-enhance-vertical-tabs-empty"],
-        properties: {
-          textContent: this.searchQuery
-            ? getString("no-matching-tabs")
-            : this.collapsed
-              ? "0"
-              : "No tabs open",
-        },
-      }) as HTMLDivElement;
-      listContainer.appendChild(emptyState);
-      return;
-    }
-
-    if (this.viewMode === "default") {
+      entries.push({
+        key: "empty-state",
+        signature: `empty:${this.searchQuery}:${this.collapsed}`,
+        buildNode: () =>
+          ztoolkit.UI.createElement(this.document, "div", {
+            namespace: "html",
+            classList: ["tab-enhance-vertical-tabs-empty"],
+            properties: {
+              textContent: this.searchQuery
+                ? getString("no-matching-tabs")
+                : this.collapsed
+                  ? "0"
+                  : "No tabs open",
+            },
+          }) as HTMLDivElement,
+      });
+    } else if (this.viewMode === "default") {
       renderableGroups.forEach((renderableGroup) => {
         if (
           renderableGroup.group.id === this.dragOverHeaderGroupId &&
           this.dragOverPosition === "before"
         ) {
-          listContainer.appendChild(this.renderDropPlaceholder());
+          entries.push({
+            key: `placeholder:group:${renderableGroup.group.id}:before`,
+            signature: `${renderableGroup.group.id}:before:${this.dragOverPosition}`,
+            buildNode: () => this.renderDropPlaceholder(),
+          });
         }
 
-        listContainer.appendChild(
-          this.renderGroupSection(renderableGroup, snapshot.selectedTabKey),
-        );
+        entries.push({
+          key: `group:${renderableGroup.group.id}`,
+          signature: this.getGroupSectionSignature(
+            renderableGroup,
+            selectedTabKey,
+          ),
+          buildNode: () =>
+            this.renderGroupSection(renderableGroup, selectedTabKey),
+        });
 
         if (
           renderableGroup.group.id === this.dragOverHeaderGroupId &&
           this.dragOverPosition === "after"
         ) {
-          listContainer.appendChild(this.renderDropPlaceholder());
+          entries.push({
+            key: `placeholder:group:${renderableGroup.group.id}:after`,
+            signature: `${renderableGroup.group.id}:after:${this.dragOverPosition}`,
+            buildNode: () => this.renderDropPlaceholder(),
+          });
         }
       });
 
@@ -1045,34 +1138,159 @@ export default class VerticalTabSidebar {
           tab.key === this.dragOverTabKey &&
           this.dragOverPosition === "before"
         ) {
-          listContainer.appendChild(this.renderDropPlaceholder());
+          entries.push({
+            key: `placeholder:tab:${tab.key}:before`,
+            signature: `${tab.key}:before:${this.dragOverPosition}`,
+            buildNode: () => this.renderDropPlaceholder(),
+          });
         }
 
-        listContainer.appendChild(
-          this.renderTabRow(tab, snapshot.selectedTabKey, {
+        entries.push({
+          key: `tab:${tab.key}`,
+          signature: this.getTabRowSignature(tab, selectedTabKey, {
             sortable: true,
             grouped: false,
           }),
-        );
+          buildNode: () =>
+            this.renderTabRow(tab, selectedTabKey, {
+              sortable: true,
+              grouped: false,
+            }),
+        });
 
         if (
           tab.key === this.dragOverTabKey &&
           this.dragOverPosition === "after"
         ) {
-          listContainer.appendChild(this.renderDropPlaceholder());
+          entries.push({
+            key: `placeholder:tab:${tab.key}:after`,
+            signature: `${tab.key}:after:${this.dragOverPosition}`,
+            buildNode: () => this.renderDropPlaceholder(),
+          });
         }
       });
-      return;
+    } else {
+      aggregateSections.forEach((section) => {
+        if (!section.tabs.length) {
+          return;
+        }
+        entries.push({
+          key: `section:${section.id}`,
+          signature: this.getAggregateSectionSignature(section, selectedTabKey),
+          buildNode: () => this.renderAggregateSection(section, selectedTabKey),
+        });
+      });
     }
 
-    aggregateSections.forEach((section) => {
-      if (!section.tabs.length) {
-        return;
-      }
-      listContainer.appendChild(
-        this.renderAggregateSection(section, snapshot.selectedTabKey),
-      );
-    });
+    this.sidebarRenderer?.render(entries);
+  }
+
+  private getTabRowSignature(
+    tab: TrackedTab,
+    selectedTabKey: string | null,
+    options: {
+      sortable: boolean;
+      grouped: boolean;
+      groupId?: string;
+      memberKey?: string;
+    },
+  ): string {
+    const selected = selectedTabKey
+      ? tab.key === selectedTabKey
+      : Boolean(tab.isSelected);
+    const multiSelected = options.memberKey
+      ? this.selectedGroupMemberKeys.has(options.memberKey)
+      : this.selectedTabKeys.has(tab.key);
+
+    return [
+      tab.key,
+      tab.title,
+      tab.type,
+      tab.itemID ?? "",
+      tab.parentItemID ?? "",
+      tab.isOpen ? "1" : "0",
+      tab.nativeIndex,
+      tab.openedAt ?? "",
+      tab.iconKey,
+      selected ? "1" : "0",
+      multiSelected ? "1" : "0",
+      options.sortable ? "1" : "0",
+      options.grouped ? "1" : "0",
+      options.groupId ?? "",
+      options.memberKey ?? "",
+      this.draggedTabKey === tab.key ? "1" : "0",
+      this.draggedMemberKey === options.memberKey ? "1" : "0",
+      this.collapsed ? "1" : "0",
+    ].join("|");
+  }
+
+  private getGroupSectionSignature(
+    renderable: RenderableGroup,
+    selectedTabKey: string | null,
+  ): string {
+    const memberSignature = renderable.members
+      .map((member) =>
+        [
+          member.key,
+          member.id,
+          member.title,
+          member.type,
+          member.itemID ?? "",
+          member.parentItemID ?? "",
+          member.isOpen ? "1" : "0",
+          member.openedAt ?? "",
+          member.iconKey,
+          this.selectedGroupMemberKeys.has(member.key) ? "1" : "0",
+          selectedTabKey &&
+          ((member.tabId && member.tabId === selectedTabKey) ||
+            member.sourceTabKey === selectedTabKey)
+            ? "1"
+            : "0",
+        ].join(":"),
+      )
+      .join("~");
+
+    return [
+      renderable.group.id,
+      renderable.group.name,
+      renderable.group.color,
+      renderable.group.collapsed ? "1" : "0",
+      renderable.group.sortMode,
+      renderable.members.length,
+      memberSignature,
+      this.draggedGroupId === renderable.group.id ? "1" : "0",
+      this.draggedHeaderGroupId === renderable.group.id ? "1" : "0",
+      this.dragOverGroupId === renderable.group.id ? "1" : "0",
+      this.dragOverHeaderGroupId === renderable.group.id ? "1" : "0",
+      this.dragOverPosition ?? "",
+    ].join("|");
+  }
+
+  private getAggregateSectionSignature(
+    section: AggregateSection,
+    selectedTabKey: string | null,
+  ): string {
+    return [
+      section.id,
+      section.title,
+      section.tabs.length,
+      selectedTabKey ?? "",
+      section.tabs
+        .map((tab) =>
+          [
+            tab.key,
+            tab.title,
+            tab.type,
+            tab.itemID ?? "",
+            tab.parentItemID ?? "",
+            tab.nativeIndex,
+            tab.openedAt ?? "",
+            tab.isSelected ? "1" : "0",
+            this.selectedTabKeys.has(tab.key) ? "1" : "0",
+          ].join(":"),
+        )
+        .join("~"),
+    ].join("|");
   }
 
   private getViewTitle(): string {
@@ -1235,13 +1453,16 @@ export default class VerticalTabSidebar {
           listener: (event: Event) => {
             event.preventDefault();
             event.stopPropagation();
-            
+
             // Ctrl+Click: Select all members in this group
-            if ((event as MouseEvent).ctrlKey || (event as MouseEvent).metaKey) {
+            if (
+              (event as MouseEvent).ctrlKey ||
+              (event as MouseEvent).metaKey
+            ) {
               this.selectAllMembersInGroup(renderable.group.id);
               return;
             }
-            
+
             this.requestGroupCollapsedToggle(
               renderable.group.id,
               renderable.group.collapsed,
@@ -1362,11 +1583,7 @@ export default class VerticalTabSidebar {
       }
 
       members.appendChild(
-        this.renderGroupMemberRow(
-          member,
-          renderable.group.id,
-          selectedTabKey,
-        ),
+        this.renderGroupMemberRow(member, renderable.group.id, selectedTabKey),
       );
 
       if (
@@ -1419,7 +1636,6 @@ export default class VerticalTabSidebar {
     this.pendingGroupToggleTimers.set(groupId, timerId);
   }
 
-
   private applyGroupMembersVisibility(
     members: HTMLDivElement,
     collapsed: boolean,
@@ -1432,7 +1648,7 @@ export default class VerticalTabSidebar {
     return groups
       .map((group) => {
         const groupNameMatches = this.matchesGroupName(group.name);
-        
+
         // Single pass: lookup liveTab, then filter and map together
         const enrichedMembers = group.members
           .map((member) => {
@@ -1556,7 +1772,9 @@ export default class VerticalTabSidebar {
       return false;
     }
 
-    const visibleGroupIds = this.groupStore.getGroups().map((group) => group.id);
+    const visibleGroupIds = this.groupStore
+      .getGroups()
+      .map((group) => group.id);
     const sourceIndex = visibleGroupIds.indexOf(sourceGroupId);
     const targetIndex = visibleGroupIds.indexOf(targetGroupId);
     if (sourceIndex < 0 || targetIndex < 0) {
@@ -1690,7 +1908,10 @@ export default class VerticalTabSidebar {
     }
 
     // Multi-select visual feedback
-    if (options.memberKey && this.selectedGroupMemberKeys.has(options.memberKey)) {
+    if (
+      options.memberKey &&
+      this.selectedGroupMemberKeys.has(options.memberKey)
+    ) {
       // Group member (opened tab)
       row.classList.add("is-multi-selected");
     } else if (!options.memberKey && this.selectedTabKeys.has(tab.key)) {
@@ -1959,7 +2180,7 @@ export default class VerticalTabSidebar {
     const groupId = row.dataset.groupId ?? null;
     const memberKey = row.dataset.memberKey ?? null;
     if (groupId && memberKey) {
-    this.hideContextMenu();
+      this.hideContextMenu();
       this.draggedTabKey = null;
       this.draggedGroupId = groupId;
       this.draggedMemberKey = memberKey;
@@ -2050,14 +2271,45 @@ export default class VerticalTabSidebar {
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = "move";
     }
+    const target = event.target;
+    const clientY = event.clientY;
+    this.scheduleDragOver(() => {
+      if (this.draggedGroupId && this.draggedMemberKey) {
+        const currentRow = this.getSortableRowFromEventTarget(target);
+        if (!currentRow) {
+          return;
+        }
 
-    const target = this.resolveDropTargetFromPoint(event.clientY);
-    if (!target) {
-      this.clearDropIndicator();
-      return;
-    }
+        const currentTargetGroupId = currentRow.dataset.groupId ?? null;
+        const currentTargetMemberKey = currentRow.dataset.memberKey ?? null;
+        if (
+          !currentTargetGroupId ||
+          !currentTargetMemberKey ||
+          currentTargetGroupId !== this.draggedGroupId ||
+          currentTargetMemberKey === this.draggedMemberKey
+        ) {
+          this.clearDropIndicator();
+          return;
+        }
 
-    this.setDropIndicator(target.tabKey, target.position);
+        this.setGroupDropIndicator(
+          currentTargetGroupId,
+          currentTargetMemberKey,
+          this.getDropPosition(currentRow, {
+            clientY,
+          } as DragEvent),
+        );
+        return;
+      }
+
+      const nextTarget = this.resolveDropTargetFromPoint(clientY);
+      if (!nextTarget) {
+        this.clearDropIndicator();
+        return;
+      }
+
+      this.setDropIndicator(nextTarget.tabKey, nextTarget.position);
+    });
   };
 
   private readonly handleRowDrop = (event: DragEvent) => {
@@ -2137,14 +2389,16 @@ export default class VerticalTabSidebar {
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = "move";
     }
+    const clientY = event.clientY;
+    this.scheduleDragOver(() => {
+      const target = this.resolveGroupHeaderDropTargetFromPoint(clientY);
+      if (!target) {
+        this.clearDropIndicator();
+        return;
+      }
 
-    const target = this.resolveGroupHeaderDropTargetFromPoint(event.clientY);
-    if (!target) {
-      this.clearDropIndicator();
-      return;
-    }
-
-    this.setGroupHeaderDropIndicator(target.groupId, target.position);
+      this.setGroupHeaderDropIndicator(target.groupId, target.position);
+    });
   };
 
   private readonly handleGroupHeaderDrop = (event: DragEvent) => {
@@ -2202,7 +2456,9 @@ export default class VerticalTabSidebar {
     if (this.selectedTabKeys.size > 1) {
       const selectedTabs = this.getSelectedTabs();
       if (selectedTabs.length > 0) {
-        const name = this.promptForGroupName(`批量分组 (${selectedTabs.length})`);
+        const name = this.promptForGroupName(
+          `批量分组 (${selectedTabs.length})`,
+        );
         if (name !== null) {
           this.groupStore.createGroupFromTabs(selectedTabs, name);
           this.clearMultiSelect();
@@ -2244,7 +2500,7 @@ export default class VerticalTabSidebar {
     }
 
     // Close all collected tabs
-    openTabs.forEach(tab => {
+    openTabs.forEach((tab) => {
       if (tab.tabId) {
         this.commandController.close(tab.tabId);
       }
@@ -2259,250 +2515,93 @@ export default class VerticalTabSidebar {
     notification.startCloseTimer(3000);
   }
 
-  // ==================== Multi-select Methods ====================
-
-  private toggleMultiSelect(tabKey: string | null, memberKey: string | null, event: MouseEvent, groupId?: string | null): boolean {
-    // For tabs inside a group, prefer the memberKey for list matching
-    const activeKey = memberKey || tabKey;
-    if (!activeKey) return false;
-
-    // Determine the visual list based on context
-    let currentList: string[] = [];
-    if (groupId) {
-      const group = this.groupStore.findGroupById(groupId);
-      if (group) {
-        currentList = group.members.map(m => m.key);
-      }
-    } else {
-      // For ungrouped tabs, use the visual order in the sidebar
-      const allTabs = this.tracker.getSnapshot().tabs.filter(t => this.shouldRenderTab(t));
-      currentList = allTabs.filter(t => this.getGroupIdForKey(t.key) === null).map(t => t.key);
-    }
-
-    const currentIndex = currentList.indexOf(activeKey);
-    if (currentIndex === -1) return false;
-
-    // Always set the last selected index on Ctrl+Click or first click
-    if (event.ctrlKey || event.metaKey || event.shiftKey) {
-      // Ctrl/Cmd+Click: Toggle single selection
-      if (groupId) {
-        if (this.selectedGroupMemberKeys.has(activeKey)) {
-          this.selectedGroupMemberKeys.delete(activeKey);
-        } else {
-          this.selectedGroupMemberKeys.add(activeKey);
-        }
-      } else {
-        if (this.selectedTabKeys.has(activeKey)) {
-          this.selectedTabKeys.delete(activeKey);
-        } else {
-          this.selectedTabKeys.add(activeKey);
-        }
-      }
-
-      // If shift is also held, do range selection
-      if (event.shiftKey && this.lastSelectedIndex >= 0 && this.lastSelectedGroupId === groupId) {
-        const start = Math.min(this.lastSelectedIndex, currentIndex);
-        const end = Math.max(this.lastSelectedIndex, currentIndex);
-        for (let i = start; i <= end; i++) {
-          const key = currentList[i];
-          if (groupId) {
-            this.selectedGroupMemberKeys.add(key);
-          } else {
-            this.selectedTabKeys.add(key);
-          }
-        }
-      }
-      
-      this.lastSelectedIndex = currentIndex;
-      this.lastSelectedGroupId = groupId || null;
-    } else {
-      // Regular click: If there are selections, keep them; otherwise, open tab
-      if ((groupId && this.selectedGroupMemberKeys.size > 0) || this.selectedTabKeys.size > 0) {
-        return true; // Consume the click, don't open tab
-      }
-      return false; // Let original handler open the tab
-    }
-
-    this.updateMultiSelectUI();
-    return true;
+  private toggleMultiSelect(
+    tabKey: string | null,
+    memberKey: string | null,
+    event: MouseEvent,
+    groupId?: string | null,
+  ): boolean {
+    return toggleMultiSelect(
+      this as unknown as SidebarMultiSelectHost,
+      tabKey,
+      memberKey,
+      event,
+      groupId,
+    );
   }
 
   private getGroupIdForKey(tabKey: string): string | null {
     const tab = this.trackedTabsByKey.get(tabKey);
     if (!tab) return null;
-    
+
     const memberKey = this.groupStore.makeMemberKeyFromTab(tab);
     const groups = this.groupStore.getGroups();
     for (const group of groups) {
-      if (group.members.some(m => m.key === memberKey)) {
+      if (group.members.some((m) => m.key === memberKey)) {
         return group.id;
       }
     }
     return null;
   }
 
-  private toggleGroupMemberMultiSelect(memberKey: string, event: MouseEvent): boolean {
-    if (!memberKey) return false;
-
-    if (event.ctrlKey || event.metaKey || event.shiftKey) {
-      if (this.selectedGroupMemberKeys.has(memberKey)) {
-        this.selectedGroupMemberKeys.delete(memberKey);
-      } else {
-        this.selectedGroupMemberKeys.add(memberKey);
-      }
-      this.updateMultiSelectUI();
-      return true;
-    }
-
-    if (this.selectedGroupMemberKeys.size > 0) {
-      return true;
-    }
-    return false;
+  private toggleGroupMemberMultiSelect(
+    memberKey: string,
+    event: MouseEvent,
+  ): boolean {
+    return toggleGroupMemberMultiSelect(
+      this as unknown as SidebarMultiSelectHost,
+      memberKey,
+      event,
+    );
   }
 
   private clearMultiSelect(): void {
-    this.selectedTabKeys.clear();
-    this.selectedGroupMemberKeys.clear();
-    this.lastSelectedIndex = -1;
-    this.lastSelectedGroupId = null;
-    this.updateMultiSelectUI();
+    clearMultiSelect(this as unknown as SidebarMultiSelectHost);
   }
 
   private selectAllMembersInGroup(groupId: string): void {
-    const group = this.groupStore.findGroupById(groupId);
-    if (!group) return;
-
-    group.members.forEach(member => {
-      this.selectedGroupMemberKeys.add(member.key);
-    });
-    this.lastSelectedGroupId = groupId;
-    this.updateMultiSelectUI();
+    selectAllMembersInGroup(this as unknown as SidebarMultiSelectHost, groupId);
   }
 
   private updateMultiSelectUI(): void {
-    // Update visual state of all rows
-    const allRows = this.listContainer?.querySelectorAll(".tab-enhance-vertical-tab-row");
-    if (!allRows) return;
-
-    allRows.forEach((row: Element) => {
-      const element = row as HTMLDivElement;
-      const tabKey = element.dataset.tabKey;
-      const memberKey = element.dataset.memberKey;
-
-      // Handle ungrouped tabs
-      if (tabKey) {
-        if (this.selectedTabKeys.has(tabKey)) {
-          element.classList.add("is-multi-selected");
-        } else {
-          element.classList.remove("is-multi-selected");
-        }
-      }
-
-      // Handle group members
-      if (memberKey) {
-        if (this.selectedGroupMemberKeys.has(memberKey)) {
-          element.classList.add("is-multi-selected");
-        } else {
-          element.classList.remove("is-multi-selected");
-        }
-      }
-    });
-
-    // Update count badge if in multi-select mode
-    if (this.countBadge) {
-      const totalCount = this.selectedTabKeys.size + this.selectedGroupMemberKeys.size;
-      if (totalCount > 0) {
-        this.countBadge.textContent = `${totalCount}✓`;
-        this.countBadge.classList.add("is-multi-select");
-      } else {
-        const openTabs = this.tracker.getSnapshot().tabs.filter(tab => this.shouldRenderTab(tab));
-        this.countBadge.textContent = String(openTabs.length);
-        this.countBadge.classList.remove("is-multi-select");
-      }
-    }
+    updateMultiSelectUI(this as unknown as SidebarMultiSelectHost);
   }
 
   private getSelectedTabs(): TrackedTab[] {
-    return Array.from(this.selectedTabKeys)
-      .map(key => this.trackedTabsByKey.get(key))
-      .filter((tab): tab is TrackedTab => tab != null);
+    return getSelectedTabs(this as unknown as SidebarMultiSelectHost);
   }
 
   private addSelectedToGroup(groupId: string): void {
-    const selectedTabs = this.getSelectedTabs();
-    if (selectedTabs.length > 0) {
-      this.groupStore.addTabsToGroup(groupId, selectedTabs);
-      this.clearMultiSelect();
-    }
+    addSelectedToGroup(this as unknown as SidebarMultiSelectHost, groupId);
   }
 
   private removeSelectedFromGroup(currentGroupId?: string): void {
-    if (currentGroupId) {
-      // Only remove from the specific group
-      const group = this.groupStore.findGroupById(currentGroupId);
-      if (group) {
-        // Remove selected group members from this group
-        this.selectedGroupMemberKeys.forEach(memberKey => {
-          if (group.members.some(m => m.key === memberKey)) {
-            this.groupStore.removeMember(currentGroupId, memberKey);
-          }
-        });
-
-        // Remove selected tabs that belong to this group
-        this.selectedTabKeys.forEach(tabKey => {
-          const tab = this.trackedTabsByKey.get(tabKey);
-          if (tab) {
-            const memberKey = this.groupStore.makeMemberKeyFromTab(tab);
-            if (group.members.some(m => m.key === memberKey)) {
-              this.groupStore.removeMember(currentGroupId, memberKey);
-            }
-          }
-        });
-      }
-    } else {
-      // Remove from all groups (old behavior)
-      this.selectedTabKeys.forEach(tabKey => {
-        const groups = this.groupStore.getGroups();
-        groups.forEach(group => {
-          const member = group.members.find(m => {
-            const tab = this.trackedTabsByKey.get(tabKey);
-            return tab && this.groupStore.makeMemberKeyFromTab(tab) === m.key;
-          });
-          if (member) {
-            this.groupStore.removeMember(group.id, member.key);
-          }
-        });
-      });
-
-      this.selectedGroupMemberKeys.forEach(memberKey => {
-        const groups = this.groupStore.getGroups();
-        groups.forEach(group => {
-          if (group.members.some(m => m.key === memberKey)) {
-            this.groupStore.removeMember(group.id, memberKey);
-          }
-        });
-      });
-    }
-
-    if (this.selectedTabKeys.size > 0 || this.selectedGroupMemberKeys.size > 0) {
-      this.clearMultiSelect();
-    }
+    removeSelectedFromGroup(
+      this as unknown as SidebarMultiSelectHost,
+      currentGroupId,
+    );
   }
 
   private closeSelectedTabs(): void {
-    const selectedTabs = this.getSelectedTabs();
-    const tabsToClose = selectedTabs.filter(tab => tab.tabId);
+    closeSelectedTabs(this as unknown as SidebarMultiSelectHost);
+  }
 
-    tabsToClose.forEach(tab => {
-      if (tab.tabId) {
-        this.commandController.close(tab.tabId);
-      }
-    });
+  private showGroupSelectionMenu(tabs: TrackedTab[]): void {
+    showGroupSelectionMenu(this as unknown as SidebarMultiSelectHost, tabs);
+  }
 
-    if (tabsToClose.length > 0) {
-      this.clearMultiSelect();
-      this.tracker.reconcile("multi-select-close");
-    }
+  private showGroupMemberSelectionMenu(groupId: string): void {
+    showGroupMemberSelectionMenu(
+      this as unknown as SidebarMultiSelectHost,
+      groupId,
+    );
+  }
+
+  private addSelectedGroupMembersToGroup(targetGroupId: string): void {
+    addSelectedGroupMembersToGroup(
+      this as unknown as SidebarMultiSelectHost,
+      targetGroupId,
+    );
   }
 
   private showPanelWithGroupButtons(
@@ -2512,7 +2611,10 @@ export default class VerticalTabSidebar {
   ): void {
     if (groups.length === 0) return;
 
-    const panel = ztoolkit.createXULElement(this.document, "panel") as unknown as XULPopupElement;
+    const panel = ztoolkit.createXULElement(
+      this.document,
+      "panel",
+    ) as unknown as XULPopupElement;
     panel.setAttribute("id", `${config.addonRef}-${panelId}`);
     panel.setAttribute("type", "arrow");
     panel.setAttribute("flip", "both");
@@ -2560,22 +2662,15 @@ export default class VerticalTabSidebar {
     );
   }
 
-  private showGroupSelectionMenu(tabs: TrackedTab[]): void {
-    const groups = this.groupStore.getGroups();
-    if (groups.length === 0) return;
-
-    this.showPanelWithGroupButtons(
-      "group-selection-panel",
-      groups,
-      (group) => () => this.addSelectedToGroup(group.id),
-    );
-  }
-
   private addMemberToGroup(groupId: string, member: VirtualGroupMember): void {
     // Add virtual member to another group using itemID, preserving original title
     if (member.itemID != null) {
       this.groupStore.addItemsToGroup(groupId, [
-        { itemID: member.itemID, parentItemID: member.parentItemID, title: member.title }
+        {
+          itemID: member.itemID,
+          parentItemID: member.parentItemID,
+          title: member.title,
+        },
       ]);
     }
   }
@@ -2583,44 +2678,6 @@ export default class VerticalTabSidebar {
   private getTrackedTabByMemberKey(memberKey: string): TrackedTab | null {
     return this.trackedTabsByMemberKey.get(memberKey) ?? null;
   }
-
-  private showGroupMemberSelectionMenu(groupId: string): void {
-    const groups = this.groupStore.getGroups();
-    if (groups.length === 0) return;
-
-    this.showPanelWithGroupButtons(
-      "group-member-selection-panel",
-      groups,
-      (group) => () => this.addSelectedGroupMembersToGroup(group.id),
-    );
-  }
-
-  private addSelectedGroupMembersToGroup(targetGroupId: string): void {
-    const groups = this.groupStore.getGroups();
-    const selectedMembers: Array<{ groupId: string; memberKey: string }> = [];
-
-    this.selectedGroupMemberKeys.forEach(memberKey => {
-      const group = groups.find(g => g.members.some(m => m.key === memberKey));
-      if (group) {
-        selectedMembers.push({ groupId: group.id, memberKey });
-      }
-    });
-
-    if (selectedMembers.length > 0) {
-      // Get member details and add to target group
-      selectedMembers.forEach(({ memberKey }) => {
-        const group = groups.find(g => g.members.some(m => m.key === memberKey));
-        const member = group?.members.find(m => m.key === memberKey);
-        if (member && member.itemID != null) {
-          this.groupStore.addItemsToGroup(targetGroupId, [
-            { itemID: member.itemID, parentItemID: member.parentItemID, title: member.title }
-          ]);
-        }
-      });
-      this.clearMultiSelect();
-    }
-  }
-
 
   private openGroupNamePanel(
     defaultValue: string,
@@ -2697,7 +2754,11 @@ export default class VerticalTabSidebar {
       return false;
     }
 
-    const openPromise = this.openGroupMemberAttachment(member, groupId, memberKey);
+    const openPromise = this.openGroupMemberAttachment(
+      member,
+      groupId,
+      memberKey,
+    );
     this.pendingMemberOpenPromises.set(memberKey, openPromise);
     try {
       const result = await openPromise;
@@ -2865,7 +2926,8 @@ export default class VerticalTabSidebar {
       );
 
       this.appendMenuItem(
-        getString("remove-selected-from-group") + ` (${this.selectedTabKeys.size})`,
+        getString("remove-selected-from-group") +
+          ` (${this.selectedTabKeys.size})`,
         () => this.removeSelectedFromGroup(),
       );
 
@@ -2925,7 +2987,8 @@ export default class VerticalTabSidebar {
     if (hasMultiSelect) {
       // Multi-select batch operations
       this.appendMenuItem(
-        getString("add-selected-to-group") + ` (${this.selectedGroupMemberKeys.size})`,
+        getString("add-selected-to-group") +
+          ` (${this.selectedGroupMemberKeys.size})`,
         () => {
           const groups = this.groupStore.getGroups();
           if (groups.length > 0) {
@@ -2936,7 +2999,8 @@ export default class VerticalTabSidebar {
       );
 
       this.appendMenuItem(
-        getString("remove-selected-from-group") + ` (${this.selectedGroupMemberKeys.size})`,
+        getString("remove-selected-from-group") +
+          ` (${this.selectedGroupMemberKeys.size})`,
         () => this.removeSelectedFromGroup(groupId),
       );
 
@@ -2957,7 +3021,7 @@ export default class VerticalTabSidebar {
       // Add to group submenu (for both opened and unopened tabs)
       const groups = this.groupStore.getGroups();
       if (groups.length > 0) {
-        const otherGroups = groups.filter(g => g.id !== groupId);
+        const otherGroups = groups.filter((g) => g.id !== groupId);
         if (otherGroups.length > 0) {
           this.appendGroupSubmenu(
             getString("add-to-group"),
@@ -2969,7 +3033,11 @@ export default class VerticalTabSidebar {
                 const virtualGroup = this.groupStore.createEmptyGroup(name);
                 if (virtualGroup && member.itemID != null) {
                   this.groupStore.addItemsToGroup(virtualGroup.id, [
-                    { itemID: member.itemID, parentItemID: member.parentItemID, title: member.title }
+                    {
+                      itemID: member.itemID,
+                      parentItemID: member.parentItemID,
+                      title: member.title,
+                    },
                   ]);
                 }
               });
@@ -2993,7 +3061,7 @@ export default class VerticalTabSidebar {
             if (virtualGroup && member.itemID != null) {
               // Add this member to the new group
               this.groupStore.addItemsToGroup(virtualGroup.id, [
-                { itemID: member.itemID, parentItemID: member.parentItemID }
+                { itemID: member.itemID, parentItemID: member.parentItemID },
               ]);
             }
           });
@@ -3043,7 +3111,7 @@ export default class VerticalTabSidebar {
     return this.createMenuItem(
       item.label,
       async () => {
-    this.hideContextMenu();
+        this.hideContextMenu();
         if (item.disabled) {
           return;
         }
@@ -3146,7 +3214,7 @@ export default class VerticalTabSidebar {
     const menuItem = ztoolkit.createXULElement(this.document, "menuitem");
     menuItem.setAttribute("label", label);
     menuItem.addEventListener("command", async () => {
-    this.hideContextMenu();
+      this.hideContextMenu();
       if (disabled) {
         return;
       }
@@ -3248,7 +3316,6 @@ export default class VerticalTabSidebar {
     );
   }
 
-
   private commitGroupHeaderDrop(
     targetGroupId: string | null,
     position: DropPosition,
@@ -3260,7 +3327,9 @@ export default class VerticalTabSidebar {
       return;
     }
 
-    if (this.isNoOpGroupHeaderDropTarget(targetGroupId, position, sourceGroupId)) {
+    if (
+      this.isNoOpGroupHeaderDropTarget(targetGroupId, position, sourceGroupId)
+    ) {
       this.clearDragState();
       return;
     }
@@ -3330,7 +3399,6 @@ export default class VerticalTabSidebar {
       !this.dragOverGroupId &&
       !this.dragOverMemberKey
     ) {
-      this.updateDropIndicator();
       return;
     }
 
@@ -3367,7 +3435,6 @@ export default class VerticalTabSidebar {
       this.dragOverMemberKey === memberKey &&
       this.dragOverPosition === position
     ) {
-      this.updateDropIndicator();
       return;
     }
 
@@ -3401,7 +3468,6 @@ export default class VerticalTabSidebar {
       this.dragOverHeaderGroupId === groupId &&
       this.dragOverPosition === position
     ) {
-      this.updateDropIndicator();
       return;
     }
 
@@ -3443,6 +3509,7 @@ export default class VerticalTabSidebar {
     this.dragOverMemberKey = null;
     this.dragOverHeaderGroupId = null;
     this.dragOverPosition = null;
+    this.cancelDragOverFrame();
     this.updateDropIndicator();
   }
 
@@ -3534,7 +3601,6 @@ export default class VerticalTabSidebar {
     return row ? (row as HTMLDivElement) : null;
   }
 
-
   private resolveGroupHeaderDropTargetFromPoint(
     clientY: number,
   ): { groupId: string | null; position: DropPosition } | null {
@@ -3543,7 +3609,9 @@ export default class VerticalTabSidebar {
     }
 
     const groups = Array.from(
-      this.listContainer.querySelectorAll('.tab-enhance-vertical-group[data-group-id]'),
+      this.listContainer.querySelectorAll(
+        ".tab-enhance-vertical-group[data-group-id]",
+      ),
     ) as HTMLDivElement[];
     if (!groups.length) {
       return null;
@@ -3640,7 +3708,10 @@ export default class VerticalTabSidebar {
   }
 
   private getDisplayTitle(
-    input: Pick<TrackedTab | VirtualGroupMember, "title" | "itemID" | "parentItemID">,
+    input: Pick<
+      TrackedTab | VirtualGroupMember,
+      "title" | "itemID" | "parentItemID"
+    >,
   ): string {
     const mode = getPref("verticalTabTitleMode");
     if (mode === "shortTitle") {
@@ -3741,7 +3812,9 @@ export default class VerticalTabSidebar {
     }
     for (const field of fields) {
       const cacheKey =
-        typeof item.id === "number" ? `${item.id}:${field}` : `unknown:${field}`;
+        typeof item.id === "number"
+          ? `${item.id}:${field}`
+          : `unknown:${field}`;
       if (this.itemFieldCache.has(cacheKey)) {
         const cachedValue = this.itemFieldCache.get(cacheKey);
         if (cachedValue) {
