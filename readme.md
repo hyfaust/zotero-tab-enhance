@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)
 ![Downloads latest release](https://img.shields.io/github/downloads/hyfaust/zotero-tab-enhance/latest/total?color=yellow)
 
-A powerful Zotero 7 add-on that enhances tab management with vertical sidebar, grouping, batch operations, and more.
+A powerful Zotero 8 add-on that enhances tab management with vertical sidebar, grouping, batch operations, and more.
 
 ## Features
 
@@ -49,8 +49,7 @@ A powerful Zotero 7 add-on that enhances tab management with vertical sidebar, g
 
 ## Compatibility
 
-- Requires **Zotero 7.0** or higher
-- Compatible with Zotero 7.0-7.1.*
+- Requires **Zotero 8.0** or higher
 - All features are disabled by default to avoid conflicts. Enable them in preferences.
 
 ## Usage Guide
